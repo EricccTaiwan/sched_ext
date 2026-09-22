@@ -82,38 +82,23 @@ static void set_sched(int policy, int priority)
 	}
 }
 
-/* Get process runtime from /proc/<pid>/stat */
+/* On-CPU time in seconds; CPUCLOCK_SCHED samples se.sum_exec_runtime */
 static float get_process_runtime(int pid)
 {
-	char path[256];
-	FILE *file;
-	long utime, stime;
-	int fields;
+	struct timespec ts;
+	clockid_t clk;
 
-	snprintf(path, sizeof(path), "/proc/%d/stat", pid);
-	file = fopen(path, "r");
-	if (file == NULL) {
-		perror("Failed to open stat file");
+	if (clock_getcpuclockid(pid, &clk)) {
+		perror("clock_getcpuclockid");
 		return -1;
 	}
 
-	/* Skip the first 13 fields and read the 14th and 15th */
-	fields = fscanf(file,
-			"%*d %*s %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu",
-			&utime, &stime);
-	fclose(file);
-
-	if (fields != 2) {
-		fprintf(stderr, "Failed to read stat file\n");
+	if (clock_gettime(clk, &ts)) {
+		perror("clock_gettime");
 		return -1;
 	}
 
-	/* Calculate the total time spent in the process */
-	long total_time = utime + stime;
-	long ticks_per_second = sysconf(_SC_CLK_TCK);
-	float runtime_seconds = total_time * 1.0 / ticks_per_second;
-
-	return runtime_seconds;
+	return ts.tv_sec + ts.tv_nsec / 1000000000.0;
 }
 
 static enum scx_test_status setup(void **ctx)
@@ -150,6 +135,7 @@ static bool sched_stress_test(bool is_ext)
 	const char *class_str = is_ext ? "EXT" : "FAIR";
 
 	float ext_runtime, rt_runtime, actual_ratio;
+	float ext_start, rt_start;
 	int ext_pid, rt_pid;
 	int ext_ready[2], rt_ready[2];
 	bool ret = false;
@@ -201,6 +187,19 @@ static bool sched_stress_test(bool is_ext)
 	if (!wait_ready(ext_ready[0]) || !wait_ready(rt_ready[0]))
 		goto out_kill;
 
+	/*
+	 * Sample what both tasks have accumulated so far. Waiting for the
+	 * handshake can itself cost the parent a deadline server period once
+	 * the RT task is busy looping, and only the runtime the tasks accrue
+	 * between the two samples belongs to the measurement.
+	 */
+	ext_start = get_process_runtime(ext_pid);
+	rt_start = get_process_runtime(rt_pid);
+	if (ext_start == -1 || rt_start == -1) {
+		fprintf(stderr, "Failed to read initial task runtime\n");
+		goto out_kill;
+	}
+
 	/* Let the processes run for the specified time */
 	sleep(RUN_TIME);
 
@@ -217,6 +216,9 @@ static bool sched_stress_test(bool is_ext)
 		fprintf(stderr, "Failed to read RT task runtime\n");
 		goto out_kill;
 	}
+
+	ext_runtime -= ext_start;
+	rt_runtime -= rt_start;
 
 	/* Verify that the scx task got enough runtime */
 	actual_ratio = ext_runtime / (ext_runtime + rt_runtime);
