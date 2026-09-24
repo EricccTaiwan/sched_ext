@@ -20,7 +20,7 @@ static enum scx_test_status run(void *ctx)
 {
 	struct select_cpu_dfl_ctx *tctx = ctx;
 	pid_t pids[NUM_CHILDREN];
-	int i, status, nforked = 0;
+	int i, status, nforked = 0, nfailed = 0;
 
 	SCX_TEST_ATTACH(tctx, select_cpu_dfl_ops);
 
@@ -34,14 +34,16 @@ static enum scx_test_status run(void *ctx)
 			nforked++;
 	}
 
+	/* Reap every child before reporting */
 	for (i = 0; i < NUM_CHILDREN; i++) {
 		if (pids[i] <= 0)
 			continue;
-		SCX_EQ(waitpid(pids[i], &status, 0), pids[i]);
-		SCX_EQ(status, 0);
+		if (waitpid(pids[i], &status, 0) != pids[i] || status)
+			nfailed++;
 	}
 
 	SCX_GT(nforked, 0);
+	SCX_EQ(nfailed, 0);
 	SCX_ASSERT(!tctx->skel->bss->saw_local);
 
 	return SCX_TEST_PASS;
