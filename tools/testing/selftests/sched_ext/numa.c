@@ -9,44 +9,35 @@
 #include "numa.bpf.skel.h"
 #include "scx_test.h"
 
+SCX_TEST_DEFINE_CTX_TYPE(numa);
+SCX_TEST_DEFINE_CLEANUP(numa)
+
 static enum scx_test_status setup(void **ctx)
 {
-	struct numa *skel;
+	struct numa_ctx *tctx;
 
-	skel = numa__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	skel->rodata->__COMPAT_SCX_PICK_IDLE_IN_NODE = SCX_PICK_IDLE_IN_NODE;
-	skel->struct_ops.numa_ops->flags = SCX_OPS_BUILTIN_IDLE_PER_NODE;
-	SCX_FAIL_IF(numa__load(skel), "Failed to load skel");
+	SCX_TEST_OPEN(tctx, numa);
+	tctx->skel->rodata->__COMPAT_SCX_PICK_IDLE_IN_NODE = SCX_PICK_IDLE_IN_NODE;
+	tctx->skel->struct_ops.numa_ops->flags = SCX_OPS_BUILTIN_IDLE_PER_NODE;
+	SCX_TEST_LOAD(tctx, numa);
 
-	*ctx = skel;
+	*ctx = tctx;
 
 	return SCX_TEST_PASS;
 }
 
 static enum scx_test_status run(void *ctx)
 {
-	struct numa *skel = ctx;
-	struct bpf_link *link;
+	struct numa_ctx *tctx = ctx;
 
-	link = bpf_map__attach_struct_ops(skel->maps.numa_ops);
-	SCX_FAIL_IF(!link, "Failed to attach scheduler");
+	SCX_TEST_ATTACH(tctx, numa_ops);
 
 	/* Just sleeping is fine, plenty of scheduling events happening */
 	sleep(1);
 
-	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_NONE));
-	bpf_link__destroy(link);
+	SCX_EQ(tctx->skel->data->uei.kind, EXIT_KIND(SCX_EXIT_NONE));
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct numa *skel = ctx;
-
-	numa__destroy(skel);
 }
 
 struct scx_test numa = {
