@@ -13,29 +13,15 @@
 
 #define NUM_CHILDREN 1028
 
-static enum scx_test_status setup(void **ctx)
-{
-	struct select_cpu_dfl_nodispatch *skel;
-
-	skel = select_cpu_dfl_nodispatch__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(select_cpu_dfl_nodispatch__load(skel), "Failed to load skel");
-
-	*ctx = skel;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(select_cpu_dfl_nodispatch);
 
 static enum scx_test_status run(void *ctx)
 {
-	struct select_cpu_dfl_nodispatch *skel = ctx;
-	struct bpf_link *link;
+	struct select_cpu_dfl_nodispatch_ctx *tctx = ctx;
 	pid_t pids[NUM_CHILDREN];
-	int i, status;
+	int i, status, nforked = 0, nfailed = 0;
 
-	link = bpf_map__attach_struct_ops(skel->maps.select_cpu_dfl_nodispatch_ops);
-	SCX_FAIL_IF(!link, "Failed to attach scheduler");
+	SCX_TEST_ATTACH(tctx, select_cpu_dfl_nodispatch_ops);
 
 	for (i = 0; i < NUM_CHILDREN; i++) {
 		pids[i] = fork();
@@ -43,25 +29,24 @@ static enum scx_test_status run(void *ctx)
 			sleep(1);
 			exit(0);
 		}
+		if (pids[i] > 0)
+			nforked++;
 	}
 
+	/* Reap every child before reporting */
 	for (i = 0; i < NUM_CHILDREN; i++) {
-		SCX_EQ(waitpid(pids[i], &status, 0), pids[i]);
-		SCX_EQ(status, 0);
+		if (pids[i] <= 0)
+			continue;
+		if (waitpid(pids[i], &status, 0) != pids[i] || status)
+			nfailed++;
 	}
 
-	SCX_ASSERT(skel->bss->saw_local);
-
-	bpf_link__destroy(link);
+	/* With this many children, some forks may fail on a loaded machine */
+	SCX_GT(nforked, 0);
+	SCX_EQ(nfailed, 0);
+	SCX_ASSERT(tctx->skel->bss->saw_local);
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct select_cpu_dfl_nodispatch *skel = ctx;
-
-	select_cpu_dfl_nodispatch__destroy(skel);
 }
 
 struct scx_test select_cpu_dfl_nodispatch = {

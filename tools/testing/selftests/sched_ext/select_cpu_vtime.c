@@ -11,44 +11,21 @@
 #include "select_cpu_vtime.bpf.skel.h"
 #include "scx_test.h"
 
-static enum scx_test_status setup(void **ctx)
-{
-	struct select_cpu_vtime *skel;
-
-	skel = select_cpu_vtime__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(select_cpu_vtime__load(skel), "Failed to load skel");
-
-	*ctx = skel;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(select_cpu_vtime);
 
 static enum scx_test_status run(void *ctx)
 {
-	struct select_cpu_vtime *skel = ctx;
-	struct bpf_link *link;
+	struct select_cpu_vtime_ctx *tctx = ctx;
 
-	SCX_ASSERT(!skel->bss->consumed);
+	SCX_ASSERT(!tctx->skel->bss->consumed);
 
-	link = bpf_map__attach_struct_ops(skel->maps.select_cpu_vtime_ops);
-	SCX_FAIL_IF(!link, "Failed to attach scheduler");
+	SCX_TEST_ATTACH(tctx, select_cpu_vtime_ops);
 
 	sleep(1);
 
-	SCX_ASSERT(skel->bss->consumed);
-
-	bpf_link__destroy(link);
+	SCX_ASSERT(tctx->skel->bss->consumed);
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct select_cpu_vtime *skel = ctx;
-
-	select_cpu_vtime__destroy(skel);
 }
 
 struct scx_test select_cpu_vtime = {

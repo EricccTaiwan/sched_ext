@@ -10,41 +10,19 @@
 #include "ddsp_vtimelocal_fail.bpf.skel.h"
 #include "scx_test.h"
 
-static enum scx_test_status setup(void **ctx)
-{
-	struct ddsp_vtimelocal_fail *skel;
-
-	skel = ddsp_vtimelocal_fail__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(ddsp_vtimelocal_fail__load(skel), "Failed to load skel");
-
-	*ctx = skel;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(ddsp_vtimelocal_fail);
 
 static enum scx_test_status run(void *ctx)
 {
-	struct ddsp_vtimelocal_fail *skel = ctx;
-	struct bpf_link *link;
+	struct ddsp_vtimelocal_fail_ctx *tctx = ctx;
 
-	link = bpf_map__attach_struct_ops(skel->maps.ddsp_vtimelocal_fail_ops);
-	SCX_FAIL_IF(!link, "Failed to attach struct_ops");
+	SCX_TEST_ATTACH(tctx, ddsp_vtimelocal_fail_ops);
 
 	sleep(1);
 
-	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_ERROR));
-	bpf_link__destroy(link);
+	SCX_EQ(tctx->skel->data->uei.kind, EXIT_KIND(SCX_EXIT_ERROR));
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct ddsp_vtimelocal_fail *skel = ctx;
-
-	ddsp_vtimelocal_fail__destroy(skel);
 }
 
 struct scx_test ddsp_vtimelocal_fail = {

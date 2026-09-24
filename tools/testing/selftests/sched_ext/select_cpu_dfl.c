@@ -14,35 +14,7 @@
 
 #define NUM_CHILDREN 1028
 
-struct select_cpu_dfl_ctx {
-	struct select_cpu_dfl	*skel;
-	struct bpf_link		*link;
-};
-
-static enum scx_test_status setup(void **ctx)
-{
-	struct select_cpu_dfl_ctx *tctx;
-
-	tctx = malloc(sizeof(*tctx));
-	SCX_FAIL_IF(!tctx, "Failed to allocate test context");
-	tctx->link = NULL;
-
-	tctx->skel = select_cpu_dfl__open();
-	if (!tctx->skel) {
-		free(tctx);
-		SCX_FAIL("Failed to open");
-	}
-	SCX_ENUM_INIT(tctx->skel);
-	if (select_cpu_dfl__load(tctx->skel)) {
-		select_cpu_dfl__destroy(tctx->skel);
-		free(tctx);
-		SCX_FAIL("Failed to load skel");
-	}
-
-	*ctx = tctx;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(select_cpu_dfl);
 
 static enum scx_test_status run(void *ctx)
 {
@@ -50,8 +22,7 @@ static enum scx_test_status run(void *ctx)
 	pid_t pids[NUM_CHILDREN];
 	int i, status, nforked = 0;
 
-	tctx->link = bpf_map__attach_struct_ops(tctx->skel->maps.select_cpu_dfl_ops);
-	SCX_FAIL_IF(!tctx->link, "Failed to attach scheduler");
+	SCX_TEST_ATTACH(tctx, select_cpu_dfl_ops);
 
 	for (i = 0; i < NUM_CHILDREN; i++) {
 		pids[i] = fork();
@@ -74,16 +45,6 @@ static enum scx_test_status run(void *ctx)
 	SCX_ASSERT(!tctx->skel->bss->saw_local);
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct select_cpu_dfl_ctx *tctx = ctx;
-
-	if (tctx->link)
-		bpf_link__destroy(tctx->link);
-	select_cpu_dfl__destroy(tctx->skel);
-	free(tctx);
 }
 
 struct scx_test select_cpu_dfl = {
