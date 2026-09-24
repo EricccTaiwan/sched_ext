@@ -11,19 +11,7 @@
 #include "enq_select_cpu.bpf.skel.h"
 #include "scx_test.h"
 
-static enum scx_test_status setup(void **ctx)
-{
-	struct enq_select_cpu *skel;
-
-	skel = enq_select_cpu__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(enq_select_cpu__load(skel), "Failed to load skel");
-
-	*ctx = skel;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(enq_select_cpu);
 
 static int test_select_cpu_from_user(const struct enq_select_cpu *skel)
 {
@@ -51,31 +39,18 @@ static int test_select_cpu_from_user(const struct enq_select_cpu *skel)
 
 static enum scx_test_status run(void *ctx)
 {
-	struct enq_select_cpu *skel = ctx;
-	struct bpf_link *link;
+	struct enq_select_cpu_ctx *tctx = ctx;
 
-	link = bpf_map__attach_struct_ops(skel->maps.enq_select_cpu_ops);
-	if (!link) {
-		SCX_ERR("Failed to attach scheduler");
-		return SCX_TEST_FAIL;
-	}
+	SCX_TEST_ATTACH(tctx, enq_select_cpu_ops);
 
 	/* Pick an idle CPU from user-space */
-	SCX_FAIL_IF(test_select_cpu_from_user(skel), "Failed to pick idle CPU");
+	SCX_FAIL_IF(test_select_cpu_from_user(tctx->skel), "Failed to pick idle CPU");
 
 	sleep(1);
 
-	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_NONE));
-	bpf_link__destroy(link);
+	SCX_EQ(tctx->skel->data->uei.kind, EXIT_KIND(SCX_EXIT_NONE));
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct enq_select_cpu *skel = ctx;
-
-	enq_select_cpu__destroy(skel);
 }
 
 struct scx_test enq_select_cpu = {
