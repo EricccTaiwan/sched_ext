@@ -45,21 +45,14 @@ static enum scx_test_status setup(void **ctx)
 static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
 {
 	struct hotplug *skel;
-	struct bpf_link *link;
+	struct bpf_link *link = NULL;
 	enum scx_test_status status = SCX_TEST_FAIL;
 	long kind, code;
+	s64 report;
 
 	SCX_ASSERT(is_cpu_online());
 
-	skel = hotplug__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(hotplug__load(skel), "Failed to load skel");
-
-	/* Testing the offline -> online path, so go offline before starting */
-	if (onlining && toggle_online_status(0))
-		goto out_destroy_skel;
-
+	/* The lookups return on failure, so do them before owning anything */
 	if (cbs_defined) {
 		kind = SCX_KIND_VAL(SCX_EXIT_UNREG_BPF);
 		code = SCX_ECODE_VAL(SCX_ECODE_ACT_RESTART) | HOTPLUG_EXIT_RSN;
@@ -71,6 +64,18 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
 		       SCX_ECODE_VAL(SCX_ECODE_RSN_HOTPLUG);
 	}
 
+	skel = hotplug__open();
+	SCX_FAIL_IF(!skel, "Failed to open");
+	SCX_ENUM_INIT(skel);
+	if (hotplug__load(skel)) {
+		SCX_ERR("Failed to load skel");
+		goto out_destroy_skel;
+	}
+
+	/* Testing the offline -> online path, so go offline before starting */
+	if (onlining && toggle_online_status(0))
+		goto out_destroy_skel;
+
 	if (cbs_defined)
 		link = bpf_map__attach_struct_ops(skel->maps.hotplug_cb_ops);
 	else
@@ -78,8 +83,7 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
 
 	if (!link) {
 		SCX_ERR("Failed to attach scheduler");
-		hotplug__destroy(skel);
-		return SCX_TEST_FAIL;
+		goto out_destroy_skel;
 	}
 
 	if (toggle_online_status(onlining ? 1 : 0))
@@ -88,8 +92,17 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
 	while (!UEI_EXITED(skel, uei))
 		sched_yield();
 
-	SCX_EQ(skel->data->uei.kind, kind);
-	SCX_EQ(UEI_REPORT(skel, uei), code);
+	if (skel->data->uei.kind != kind) {
+		SCX_ERR("Unexpected exit kind: %llu",
+			(unsigned long long)skel->data->uei.kind);
+		goto out_destroy_link;
+	}
+	/* UEI_REPORT() dumps to stderr, so evaluate it once */
+	report = UEI_REPORT(skel, uei);
+	if (report != code) {
+		SCX_ERR("Unexpected exit code: %lld", (long long)report);
+		goto out_destroy_link;
+	}
 
 	if (!onlining && toggle_online_status(1))
 		goto out_destroy_link;
@@ -106,12 +119,17 @@ out_destroy_skel:
 static enum scx_test_status test_hotplug_attach(void)
 {
 	struct hotplug *skel;
-	struct bpf_link *link;
+	struct bpf_link *link = NULL;
 	enum scx_test_status status = SCX_TEST_FAIL;
 	long kind, code;
+	s64 report;
 
 	SCX_ASSERT(is_cpu_online());
 	SCX_ASSERT(scx_hotplug_seq() > 0);
+
+	kind = SCX_KIND_VAL(SCX_EXIT_UNREG_KERN);
+	code = SCX_ECODE_VAL(SCX_ECODE_ACT_RESTART) |
+	       SCX_ECODE_VAL(SCX_ECODE_RSN_HOTPLUG);
 
 	skel = SCX_OPS_OPEN(hotplug_nocb_ops, hotplug);
 	SCX_ASSERT(skel);
@@ -129,15 +147,24 @@ static enum scx_test_status test_hotplug_attach(void)
 	if (toggle_online_status(1))
 		goto out_destroy_link;
 
-	SCX_ASSERT(link);
+	if (!link) {
+		SCX_ERR("Failed to attach scheduler");
+		goto out_destroy_skel;
+	}
 	while (!UEI_EXITED(skel, uei))
 		sched_yield();
 
-	kind = SCX_KIND_VAL(SCX_EXIT_UNREG_KERN);
-	code = SCX_ECODE_VAL(SCX_ECODE_ACT_RESTART) |
-	       SCX_ECODE_VAL(SCX_ECODE_RSN_HOTPLUG);
-	SCX_EQ(skel->data->uei.kind, kind);
-	SCX_EQ(UEI_REPORT(skel, uei), code);
+	if (skel->data->uei.kind != kind) {
+		SCX_ERR("Unexpected exit kind: %llu",
+			(unsigned long long)skel->data->uei.kind);
+		goto out_destroy_link;
+	}
+	/* UEI_REPORT() dumps to stderr, so evaluate it once */
+	report = UEI_REPORT(skel, uei);
+	if (report != code) {
+		SCX_ERR("Unexpected exit code: %lld", (long long)report);
+		goto out_destroy_link;
+	}
 
 	status = SCX_TEST_PASS;
 out_destroy_link:
