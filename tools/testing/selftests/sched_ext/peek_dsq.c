@@ -79,6 +79,7 @@ static enum scx_test_status run(void *ctx)
 	struct peek_dsq *skel = ctx;
 	bool failed = false;
 	int seconds = 3;
+	int exit_kind;
 	int err;
 
 	/* Enable the scheduler to test DSQ operations */
@@ -136,10 +137,10 @@ static enum scx_test_status run(void *ctx)
 	}
 	printf("Background workload threads stopped.\n");
 
-	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_NONE));
-
-	/* Detach the scheduler */
+	/* Detach first so a failed check cannot leave the scheduler loaded */
+	exit_kind = skel->data->uei.kind;
 	bpf_link__destroy(link);
+	SCX_EQ(exit_kind, EXIT_KIND(SCX_EXIT_NONE));
 
 	printf("Enqueue/dispatch count over %d seconds: %d / %d\n", seconds,
 		skel->data->enqueue_count, skel->data->dispatch_count);
@@ -203,12 +204,6 @@ static enum scx_test_status run(void *ctx)
 static void cleanup(void *ctx)
 {
 	struct peek_dsq *skel = ctx;
-
-	if (workload_running) {
-		workload_running = false;
-		for (int i = 0; i < NUM_WORKERS; i++)
-			pthread_join(workload_threads[i], NULL);
-	}
 
 	peek_dsq__destroy(skel);
 }
