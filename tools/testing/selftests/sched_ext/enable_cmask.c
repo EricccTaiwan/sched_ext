@@ -70,13 +70,27 @@ static int child(int idx)
 	return waitpid(pid, &status, 0) == pid && !status ? 0 : 1;
 }
 
+/* In a helper, so a failing SCX_*() check cannot skip run()'s teardown */
+static enum scx_test_status check_counts(const struct enable_cmask *skel, int failed)
+{
+	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_UNREG));
+	SCX_EQ(failed, 0);
+	SCX_GE(skel->bss->nr_enable, 2 * NR_CHILDREN);
+	SCX_EQ(skel->bss->nr_initial_set_cmask, skel->bss->nr_enable);
+	SCX_GT(skel->bss->nr_set_cmask, skel->bss->nr_initial_set_cmask);
+	SCX_GE(skel->bss->nr_set_weight, skel->bss->nr_enable);
+
+	return SCX_TEST_PASS;
+}
+
 static enum scx_test_status run(void *ctx)
 {
-	struct enable_cmask *skel;
-	struct bpf_link *link;
+	enum scx_test_status status = SCX_TEST_FAIL;
+	struct enable_cmask *skel = NULL;
+	struct bpf_link *link = NULL;
 	pid_t pids[NR_CHILDREN];
 	cpu_set_t set;
-	int i, status, failed = 0;
+	int i, wstatus, nforked = 0, failed = 0;
 
 	if (!__COMPAT_struct_has_field("scx_enable_args", "cmask_arena_addr"))
 		return SCX_TEST_SKIP;
@@ -91,43 +105,62 @@ static enum scx_test_status run(void *ctx)
 	skel = enable_cmask__open();
 	SCX_FAIL_IF(!skel, "Failed to open");
 	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(enable_cmask__load(skel), "Failed to load skel");
+	if (enable_cmask__load(skel)) {
+		SCX_ERR("Failed to load skel");
+		goto out;
+	}
 
 	link = bpf_map__attach_struct_ops(skel->maps.enable_cmask_ops);
-	SCX_FAIL_IF(!link, "Failed to attach struct_ops");
+	if (!link) {
+		SCX_ERR("Failed to attach struct_ops");
+		goto out;
+	}
 
 	for (i = 0; i < NR_CHILDREN; i++) {
 		pids[i] = fork();
-		SCX_FAIL_IF(pids[i] < 0, "Failed to fork");
 		if (!pids[i])
 			exit(child(i));
+		if (pids[i] > 0)
+			nforked++;
 	}
 
-	/* affinity changes from the outside race with the children's own */
-	for (i = 0; i < NR_CHILDREN; i++)
-		pin(pids[i], i + NR_CHILDREN);
+	/*
+	 * Affinity changes from the outside race with the children's own. A
+	 * child may already have exited by now, so a failure here is expected.
+	 */
+	for (i = 0; i < NR_CHILDREN; i++) {
+		if (pids[i] > 0)
+			pin(pids[i], i + NR_CHILDREN);
+	}
 
 	for (i = 0; i < NR_CHILDREN; i++) {
-		if (waitpid(pids[i], &status, 0) != pids[i] || status)
+		if (pids[i] <= 0)
+			continue;
+		if (waitpid(pids[i], &wstatus, 0) != pids[i] || wstatus)
 			failed++;
 	}
 
 	bpf_link__destroy(link);
+	link = NULL;
 
-	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_UNREG));
-	SCX_EQ(failed, 0);
-	SCX_GE(skel->bss->nr_enable, 2 * NR_CHILDREN);
-	SCX_EQ(skel->bss->nr_initial_set_cmask, skel->bss->nr_enable);
-	SCX_GT(skel->bss->nr_set_cmask, skel->bss->nr_initial_set_cmask);
-	SCX_GE(skel->bss->nr_set_weight, skel->bss->nr_enable);
+	if (nforked < NR_CHILDREN) {
+		SCX_ERR("Failed to fork %d children", NR_CHILDREN - nforked);
+		goto out;
+	}
+
 	printf("enable=%lu initial_set_cmask=%lu set_cmask=%lu set_weight=%lu\n",
 	       (unsigned long)skel->bss->nr_enable,
 	       (unsigned long)skel->bss->nr_initial_set_cmask,
 	       (unsigned long)skel->bss->nr_set_cmask,
 	       (unsigned long)skel->bss->nr_set_weight);
 
+	status = check_counts(skel, failed);
+out:
+	if (link)
+		bpf_link__destroy(link);
 	enable_cmask__destroy(skel);
-	return SCX_TEST_PASS;
+
+	return status;
 }
 
 struct scx_test enable_cmask = {
