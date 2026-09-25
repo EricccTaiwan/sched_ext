@@ -84,8 +84,9 @@ static enum scx_test_status run_scenario(struct dequeue *skel, u32 scenario,
 	struct bpf_link *link;
 	pid_t pids[NUM_WORKERS];
 	pthread_t hammer;
+	bool hammer_failed = false;
 
-	int i, status;
+	int i, wstatus, nforked = 0, nfailed = 0;
 	u64 enq_start, deq_start,
 	    dispatch_deq_start, change_deq_start, bpf_queue_full_start;
 	u64 enq_delta, deq_delta,
@@ -107,13 +108,13 @@ static enum scx_test_status run_scenario(struct dequeue *skel, u32 scenario,
 	/* Fork worker processes to generate enqueue/dequeue events */
 	for (i = 0; i < NUM_WORKERS; i++) {
 		pids[i] = fork();
-		SCX_FAIL_IF(pids[i] < 0, "Failed to fork worker %d", i);
-
 		if (pids[i] == 0) {
 			worker_fn(i);
 			/* Should not reach here */
 			exit(1);
 		}
+		if (pids[i] > 0)
+			nforked++;
 	}
 
 	/*
@@ -121,18 +122,30 @@ static enum scx_test_status run_scenario(struct dequeue *skel, u32 scenario,
 	 * while they are still in BPF custody (e.g., in user DSQ or BPF
 	 * queue), triggering SCX_DEQ_SCHED_CHANGE dequeues.
 	 */
-	SCX_FAIL_IF(pthread_create(&hammer, NULL, affinity_hammer_fn, pids) != 0,
-		    "Failed to create affinity hammer thread");
-	pthread_join(hammer, NULL);
+	if (pthread_create(&hammer, NULL, affinity_hammer_fn, pids)) {
+		SCX_ERR("Failed to create affinity hammer thread");
+		hammer_failed = true;
+	} else {
+		pthread_join(hammer, NULL);
+	}
 
 	/* Wait for all workers to complete */
 	for (i = 0; i < NUM_WORKERS; i++) {
-		SCX_FAIL_IF(waitpid(pids[i], &status, 0) != pids[i],
-			    "Failed to wait for worker %d", i);
-		SCX_FAIL_IF(status != 0, "Worker %d exited with status %d", i, status);
+		if (pids[i] <= 0)
+			continue;
+		if (waitpid(pids[i], &wstatus, 0) != pids[i] || wstatus)
+			nfailed++;
 	}
 
 	bpf_link__destroy(link);
+
+	if (nforked < NUM_WORKERS || nfailed) {
+		SCX_ERR("Scenario %s: forked %d of %d workers, %d failed",
+			scenario_name, nforked, NUM_WORKERS, nfailed);
+		return SCX_TEST_FAIL;
+	}
+	if (hammer_failed)
+		return SCX_TEST_FAIL;
 
 	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_UNREG));
 
