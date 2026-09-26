@@ -85,21 +85,43 @@ static bool should_skip_test(const struct scx_test *test, const char * filter)
 	return !strstr(test->name, filter);
 }
 
+/* Whether a BPF scheduler is loaded, false if sched_ext is unavailable */
+static bool scx_sched_loaded(void)
+{
+	char buf[16] = "";
+	FILE *f;
+
+	f = fopen("/sys/kernel/sched_ext/state", "r");
+	if (!f)
+		return false;
+	if (!fgets(buf, sizeof(buf), f))
+		buf[0] = '\0';
+	fclose(f);
+
+	return buf[0] && strcmp(buf, "disabled\n");
+}
+
 static enum scx_test_status run_test(const struct scx_test *test)
 {
-	enum scx_test_status status;
+	enum scx_test_status status = SCX_TEST_PASS;
+	bool was_loaded = scx_sched_loaded();
 	void *context = NULL;
 
-	if (test->setup) {
+	if (test->setup)
 		status = test->setup(&context);
-		if (status != SCX_TEST_PASS)
-			return status;
+
+	if (status == SCX_TEST_PASS) {
+		status = test->run(context);
+
+		if (test->cleanup)
+			test->cleanup(context);
 	}
 
-	status = test->run(context);
-
-	if (test->cleanup)
-		test->cleanup(context);
+	/* Unregistering waits for the disable, so the state is final here */
+	if (!was_loaded && scx_sched_loaded()) {
+		fprintf(stderr, "ERR: %s left a BPF scheduler loaded\n", test->name);
+		status = SCX_TEST_FAIL;
+	}
 
 	return status;
 }
