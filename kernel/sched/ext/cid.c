@@ -34,19 +34,24 @@ static struct scx_cid_tables *scx_cid_tables;	/* used only during alloc/free */
 }
 
 /*
- * Return @cpu's LLC shared_cpu_map. If cacheinfo isn't populated (offline or
- * !present), record @cpu in @fallbacks and return its node mask instead - the
- * worst that can happen is that the cpu's LLC becomes coarser than reality.
+ * Return @cpu's LLC shared_cpu_map. If cacheinfo isn't populated, e.g. failed
+ * detection leaves the leaves allocated with an empty map, record @cpu in
+ * @fallbacks and return its node mask instead - the worst that can happen is
+ * that the LLC becomes coarser than reality, up to the whole node.
  */
 static const struct cpumask *cpu_llc_mask(int cpu, struct cpumask *fallbacks)
 {
 	struct cpu_cacheinfo *ci = get_cpu_cacheinfo(cpu);
+	const struct cpumask *llc;
 
-	if (!ci || !ci->info_list || !ci->num_leaves) {
-		cpumask_set_cpu(cpu, fallbacks);
-		return cpumask_of_node(cpu_to_node(cpu));
+	if (ci && ci->info_list && ci->num_leaves && ci->cpu_map_populated) {
+		llc = &ci->info_list[ci->num_leaves - 1].shared_cpu_map;
+		if (cpumask_test_cpu(cpu, llc))
+			return llc;
 	}
-	return &ci->info_list[ci->num_leaves - 1].shared_cpu_map;
+
+	cpumask_set_cpu(cpu, fallbacks);
+	return cpumask_of_node(cpu_to_node(cpu));
 }
 
 /*
@@ -362,7 +367,7 @@ s32 scx_cid_init(struct scx_sched *sch)
 	}
 
 	if (!cpumask_empty(llc_fallback))
-		pr_warn("scx_cid: cpus without cacheinfo, using node mask as llc: %*pbl\n",
+		pr_warn("scx_cid: cpus without usable cacheinfo, using node mask as llc: %*pbl\n",
 			cpumask_pr_args(llc_fallback));
 	if (!cpumask_empty(online_no_topo))
 		pr_warn("scx_cid: online cpus with no usable topology: %*pbl\n",
