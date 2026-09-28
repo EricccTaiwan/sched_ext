@@ -1693,12 +1693,11 @@ struct scx_pshard {
 	) caps[__SCX_NR_CAPS];
 
 	/*
-	 * Shard geometry captured at alloc. cmask_arena_out's own header is
+	 * Shard size captured at alloc. cmask_arena_out's own header is
 	 * bpf-writable and the live shard range can change before the
-	 * rcu-deferred free, so re-init and size cmask_arena_out from these
-	 * trusted copies instead.
+	 * rcu-deferred free, so size cmask_arena_out from this trusted copy
+	 * instead.
 	 */
-	u32			base;
 	u32			nr_cids;
 };
 #endif
@@ -1735,7 +1734,9 @@ struct scx_sched {
 	/*
 	 * Per-CPU arena cmask the kernel fills from a task's cpumask and hands
 	 * to ops_cid.enable() and ops_cid.set_cmask(). The stored pointers are
-	 * the kernel addresses.
+	 * the kernel addresses. BPF can free the backing pages, so the kernel
+	 * accesses them with the nofault helpers and aborts the scheduler when
+	 * a page is gone.
 	 */
 	struct scx_cmask * __percpu *set_cmask_scratch;
 	struct scx_cmask *online_cmask;
