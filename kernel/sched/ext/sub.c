@@ -172,12 +172,11 @@ static struct scx_pshard *alloc_pshard(struct scx_sched *sch, s32 shard_idx, s32
 	__scx_cmask_init(&cu->cmask, shard->base_cid, shard->nr_cids, SCX_CID_SHARD_MAX_CPUS);
 
 	cu->cmask_arena_out = scx_arena_alloc(sch, cmask_size);
-	if (!cu->cmask_arena_out) {
+	if (!cu->cmask_arena_out ||
+	    scx_arena_cmask_init(cu->cmask_arena_out, shard->base_cid, shard->nr_cids)) {
 		free_pshard(pshard);
 		return NULL;
 	}
-
-	scx_cmask_init(cu->cmask_arena_out, shard->base_cid, shard->nr_cids);
 
 	return pshard;
 }
@@ -840,6 +839,7 @@ static void caps_updated_deliver(struct list_head *to_deliver)
 
 		while (true) {
 			u64 caps = 0;
+			int ret = 0;
 
 			/*
 			 * During enable, has_op is set after ops.sub_attach(),
@@ -851,12 +851,8 @@ static void caps_updated_deliver(struct list_head *to_deliver)
 			scoped_guard (raw_spinlock, &cu->lock) {
 				if (cu->caps && SCX_HAS_OP(sch, sub_caps_updated) &&
 				    likely(!READ_ONCE(sch->aborting))) {
-					struct scx_cmask_ref ref;
-
 					caps = cu->caps;
-					scx_cmask_ref_init_kern(sch, cu->cmask_arena_out,
-								ps->base, ps->nr_cids, &ref);
-					scx_cmask_ref_copy(&ref, &cu->cmask);
+					ret = scx_arena_cmask_copy(cu->cmask_arena_out, &cu->cmask);
 					scx_cmask_clear(&cu->cmask);
 					cu->caps = 0;
 				} else {
@@ -865,6 +861,10 @@ static void caps_updated_deliver(struct list_head *to_deliver)
 			}
 			if (!caps)
 				break;
+			if (ret) {
+				scx_error(sch, "caps_updated cmask in the arena is inaccessible");
+				continue;
+			}
 
 			/* caps != 0 only when deliverable (has_op, above) */
 			SCX_CALL_OP(sch, sub_caps_updated, NULL, cu->cmask_arena_out, caps);

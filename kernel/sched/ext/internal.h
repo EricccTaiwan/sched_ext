@@ -1603,7 +1603,9 @@ struct scx_sched {
 	/*
 	 * Per-CPU arena cmask the kernel fills from a task's cpumask and hands
 	 * to ops_cid.enable() and ops_cid.set_cmask(). The stored pointers are
-	 * the kernel addresses.
+	 * the kernel addresses. BPF can free the backing pages, so the kernel
+	 * accesses them with the nofault helpers and aborts the scheduler when
+	 * a page is gone.
 	 */
 	struct scx_cmask * __percpu *set_cmask_scratch;
 	struct scx_cmask *online_cmask;

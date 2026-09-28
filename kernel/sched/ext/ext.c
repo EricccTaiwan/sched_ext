@@ -485,7 +485,7 @@ DEFINE_STATIC_KEY_FALSE(__scx_is_cid_type);
  * The scratch lives in BPF-writable arena memory and its header can't be
  * trusted, so it is rewritten from kernel geometry rather than read. Caller
  * must hold an rq lock so this cpu is the sole kernel writer for as long as the
- * returned address is in use.
+ * returned address is in use. If BPF has freed the backing page, abort @sch.
  */
 static struct scx_cmask *scx_fill_cmask_scratch(struct scx_sched *sch,
 						const struct cpumask *cpumask)
@@ -493,8 +493,9 @@ static struct scx_cmask *scx_fill_cmask_scratch(struct scx_sched *sch,
 	struct scx_cmask *kern_va = *this_cpu_ptr(sch->set_cmask_scratch);
 	struct scx_cmask_ref ref;
 
-	scx_cmask_ref_init_kern(sch, kern_va, 0, num_possible_cpus(), &ref);
-	scx_cmask_ref_from_cpumask(&ref, cpumask);
+	if (scx_cmask_ref_init_kern(sch, kern_va, 0, num_possible_cpus(), &ref) ||
+	    scx_cmask_ref_from_cpumask(&ref, cpumask))
+		scx_error(sch, "set_cmask scratch in the arena is inaccessible");
 	return kern_va;
 }
 
@@ -3762,9 +3763,8 @@ static void handle_hotplug(struct rq *rq, bool online)
 			list_for_each_entry(pos, &scx_sched_all, all) {
 				struct scx_cmask *mask = pos->online_cmask;
 
-				if (mask)
-					__assign_bit(cpu_or_cid, (unsigned long *)mask->bits,
-						     online);
+				if (mask && scx_arena_cmask_assign(mask, cpu_or_cid, online))
+					scx_error(pos, "online cmask in the arena is inaccessible");
 			}
 		}
 	}
@@ -5427,7 +5427,7 @@ s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
 				    SCX_CMASK_NR_WORDS(num_possible_cpus()));
 	struct scx_cmask *online;
 	struct scx_cmask_ref ref;
-	int cpu;
+	int cpu, ret;
 
 	/* hotplug stays excluded until the online mask is published */
 	lockdep_assert_cpus_held();
@@ -5445,7 +5445,9 @@ s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
 		*slot = scx_arena_alloc(sch, size);
 		if (!*slot)
 			return -ENOMEM;
-		scx_cmask_init(*slot, 0, num_possible_cpus());
+		ret = scx_arena_cmask_init(*slot, 0, num_possible_cpus());
+		if (ret)
+			return ret;
 	}
 
 	/* pack the online mask alongside the scratch masks */
@@ -5454,8 +5456,12 @@ s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
 		return -ENOMEM;
 
 	scoped_guard(rcu) {
-		scx_cmask_ref_init_kern(sch, online, 0, num_possible_cpus(), &ref);
-		scx_cmask_ref_from_cpumask(&ref, cpu_active_mask);
+		ret = scx_cmask_ref_init_kern(sch, online, 0, num_possible_cpus(), &ref) ?:
+			scx_cmask_ref_from_cpumask(&ref, cpu_active_mask);
+	}
+	if (ret) {
+		scx_arena_free(sch, online, size);
+		return ret;
 	}
 	sch->online_cmask = online;
 
@@ -10597,7 +10603,8 @@ __bpf_kfunc u32 scx_bpf_nr_online_cids(void)
  * Return a kernel-maintained cmask covering [0, scx_bpf_nr_cids()), or NULL if
  * the calling program is not associated with a live cid-form scheduler or the
  * mask is not allocated yet, as in ops.init_cids(). Treat the mask as read-only
- * even though arena memory stays writable by the BPF scheduler. The mask
+ * even though arena memory stays writable by the BPF scheduler, and don't free
+ * its pages, which aborts the scheduler on the next update. The mask
  * follows the SCX hotplug notifications: a cid's bit is updated before
  * ops.cid_online/offline() runs for it. The pointer is valid from ops.init()
  * through ops.exit(). Root ops.init() runs with hotplug excluded. Other
