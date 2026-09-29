@@ -1,0 +1,130 @@
+From e1185a091cbace55362bc2bdee4da7573249c361 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Thu, 24 Sep 2026 20:59:08 +0000
+Subject: [PATCH sched_ext/for-7.4 1/7] selftests/sched_ext: Add test context
+ helpers for skeleton and link
+
+SCX_*() assertions return from run(), so a bpf_link__destroy() at the
+end of run() is skipped when a check fails. The scheduler then stays
+loaded and the tests after it fail to attach.
+
+Add helpers that keep the skeleton and the link in a context which
+cleanup() tears down, as commit e18002d2c791 ("selftests/sched_ext:
+Fix select_cpu_dfl link leak on early return") did for one test. The
+next patch converts the affected tests.
+
+Assisted-by: Claude:claude-opus-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/scx_test.h | 90 ++++++++++++++++++++
+ 1 file changed, 90 insertions(+)
+
+diff --git a/tools/testing/selftests/sched_ext/scx_test.h b/tools/testing/selftests/sched_ext/scx_test.h
+index 90b8d6915bb7..cc60ae4ac448 100644
+--- a/tools/testing/selftests/sched_ext/scx_test.h
++++ b/tools/testing/selftests/sched_ext/scx_test.h
+@@ -9,6 +9,7 @@
+ #define __SCX_TEST_H__
+ 
+ #include <errno.h>
++#include <stdlib.h>
+ #include <scx/common.h>
+ #include <scx/compat.h>
+ 
+@@ -128,4 +129,93 @@ void scx_test_register(struct scx_test *test);
+ 	__val;									\
+ })
+ 
++/*
++ * Test context owning a skeleton and its struct_ops link. cleanup() destroys
++ * both however run() returns, so a failing SCX_*() check cannot leave the
++ * scheduler loaded for the tests that follow:
++ *
++ *	SCX_TEST_DEFINE_CTX(foo);
++ *
++ *	static enum scx_test_status run(void *ctx)
++ *	{
++ *		struct foo_ctx *tctx = ctx;
++ *
++ *		SCX_TEST_ATTACH(tctx, foo_ops);
++ *		SCX_EQ(tctx->skel->bss->nr_enqueues, 1);
++ *		return SCX_TEST_PASS;
++ *	}
++ *
++ * Tests that configure the skeleton before loading build their own setup()
++ * from SCX_TEST_OPEN() and SCX_TEST_LOAD(), with SCX_TEST_DEFINE_CTX_TYPE()
++ * and SCX_TEST_DEFINE_CLEANUP() for the rest.
++ */
++#define SCX_TEST_DEFINE_CTX_TYPE(__name)				\
++struct __name##_ctx {							\
++	struct __name		*skel;					\
++	struct bpf_link		*link;					\
++}
++
++/* Allocate @__tctx and open the skeleton into it, failing setup() on error */
++#define SCX_TEST_OPEN(__tctx, __name)					\
++	do {								\
++		(__tctx) = calloc(1, sizeof(*(__tctx)));		\
++		SCX_FAIL_IF(!(__tctx), "Failed to allocate test context"); \
++		(__tctx)->skel = __name##__open();			\
++		if (!(__tctx)->skel) {					\
++			free(__tctx);					\
++			SCX_FAIL("Failed to open");			\
++		}							\
++		SCX_ENUM_INIT((__tctx)->skel);				\
++	} while (0)
++
++/* Load the skeleton, freeing @__tctx on failure since cleanup() won't run */
++#define SCX_TEST_LOAD(__tctx, __name)					\
++	do {								\
++		if (__name##__load((__tctx)->skel)) {			\
++			__name##__destroy((__tctx)->skel);		\
++			free(__tctx);					\
++			SCX_FAIL("Failed to load skel");		\
++		}							\
++	} while (0)
++
++#define SCX_TEST_DEFINE_SETUP(__name)					\
++static enum scx_test_status setup(void **ctx)				\
++{									\
++	struct __name##_ctx *tctx;					\
++									\
++	SCX_TEST_OPEN(tctx, __name);					\
++	SCX_TEST_LOAD(tctx, __name);					\
++									\
++	*ctx = tctx;							\
++									\
++	return SCX_TEST_PASS;						\
++}
++
++#define SCX_TEST_DEFINE_CLEANUP(__name)					\
++static void cleanup(void *ctx)						\
++{									\
++	struct __name##_ctx *tctx = ctx;				\
++									\
++	if (!tctx)							\
++		return;							\
++	if (tctx->link)							\
++		bpf_link__destroy(tctx->link);				\
++	__name##__destroy(tctx->skel);					\
++	free(tctx);							\
++}
++
++/* Context type, setup() and cleanup() for tests with no custom setup */
++#define SCX_TEST_DEFINE_CTX(__name)					\
++	SCX_TEST_DEFINE_CTX_TYPE(__name);				\
++	SCX_TEST_DEFINE_SETUP(__name)					\
++	SCX_TEST_DEFINE_CLEANUP(__name)
++
++/* Attach @__map and keep the link in @__tctx for cleanup() to destroy */
++#define SCX_TEST_ATTACH(__tctx, __map)					\
++	do {								\
++		(__tctx)->link = bpf_map__attach_struct_ops(		\
++					(__tctx)->skel->maps.__map);	\
++		SCX_FAIL_IF(!(__tctx)->link, "Failed to attach scheduler"); \
++	} while (0)
++
+ #endif  // # __SCX_TEST_H__
+-- 
+2.55.0
+

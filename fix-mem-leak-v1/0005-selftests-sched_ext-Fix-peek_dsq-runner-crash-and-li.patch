@@ -1,0 +1,65 @@
+From 582d8620ad0262e9d19b03438c7dfb00cb68ba77 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Fri, 25 Sep 2026 05:04:25 +0000
+Subject: [PATCH sched_ext/for-7.4 5/7] selftests/sched_ext: Fix peek_dsq
+ runner crash and link leak on failure
+
+cleanup() joins the workload threads whenever workload_running is set,
+and it starts out true. If attaching fails, run() returns before
+creating any thread, so cleanup() calls pthread_join() on threads that
+were never created and crashes the runner, skipping every later test.
+run() already stops and joins the threads it creates, so drop the join
+from cleanup().
+
+Also read the exit kind, destroy the link and only then check it, so a
+failing SCX_EXIT_NONE check no longer leaves the scheduler loaded.
+
+Fixes: 5aff3b319997 ("sched_ext: Add a selftest for scx_bpf_dsq_peek")
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/peek_dsq.c | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/tools/testing/selftests/sched_ext/peek_dsq.c b/tools/testing/selftests/sched_ext/peek_dsq.c
+index a717384a3224..2ba0b0648238 100644
+--- a/tools/testing/selftests/sched_ext/peek_dsq.c
++++ b/tools/testing/selftests/sched_ext/peek_dsq.c
+@@ -79,6 +79,7 @@ static enum scx_test_status run(void *ctx)
+ 	struct peek_dsq *skel = ctx;
+ 	bool failed = false;
+ 	int seconds = 3;
++	int exit_kind;
+ 	int err;
+ 
+ 	/* Enable the scheduler to test DSQ operations */
+@@ -136,10 +137,10 @@ static enum scx_test_status run(void *ctx)
+ 	}
+ 	printf("Background workload threads stopped.\n");
+ 
+-	SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_NONE));
+-
+-	/* Detach the scheduler */
++	/* Detach first so a failed check cannot leave the scheduler loaded */
++	exit_kind = skel->data->uei.kind;
+ 	bpf_link__destroy(link);
++	SCX_EQ(exit_kind, EXIT_KIND(SCX_EXIT_NONE));
+ 
+ 	printf("Enqueue/dispatch count over %d seconds: %d / %d\n", seconds,
+ 		skel->data->enqueue_count, skel->data->dispatch_count);
+@@ -204,12 +205,6 @@ static void cleanup(void *ctx)
+ {
+ 	struct peek_dsq *skel = ctx;
+ 
+-	if (workload_running) {
+-		workload_running = false;
+-		for (int i = 0; i < NUM_WORKERS; i++)
+-			pthread_join(workload_threads[i], NULL);
+-	}
+-
+ 	peek_dsq__destroy(skel);
+ }
+ 
+-- 
+2.55.0
+

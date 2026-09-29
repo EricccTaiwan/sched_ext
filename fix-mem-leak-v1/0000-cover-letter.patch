@@ -1,0 +1,83 @@
+From 22a726b15068acddf2a6313e46fe9f2396f13392 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Tue, 29 Sep 2026 02:38:27 +0000
+Subject: [PATCH sched_ext/for-7.4 0/7] selftests/sched_ext: Fix scheduler leaks on early return
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+Many sched_ext selftests destroy their struct_ops link at the end of
+run(), after SCX_*() checks that return early on failure. A failing
+check then leaves the BPF scheduler loaded, and the tests that run
+after it fail to attach until something unloads it. If one of them is
+peek_dsq, its cleanup() crashes the runner and the rest of the run is
+lost.
+
+Andrea suggested applying the fix from commit e18002d2c791
+("selftests/sched_ext: Fix select_cpu_dfl link leak on early return")
+to the other selftests [1]. This series does that:
+
+  1: add scx_test.h helpers that keep the skeleton and the link in the
+     test context, so cleanup() always tears them down
+  2: convert the tests that attach once in run() to those helpers
+  3: fix the tests that open the skeleton outside setup() or attach
+     more than once, and route their early returns through the teardown
+  4: reap every child in select_cpu_dfl before reporting
+  5: fix the peek_dsq runner crash and its own link leak
+  6: fix the same leak in enable_cmask
+  7: make the runner fail and name a test that leaves a scheduler
+     loaded, so a future leak points at the right test
+
+Tested with vng on for-7.4: all tests pass, with nohz_tick skipped as
+it needs nohz_full=. Forcing failures in enq_select_cpu,
+enq_last_no_enq_fails and peek_dsq now fails only those three tests.
+
+checkpatch --strict reports 1 warning and 6 checks on patch 1, all
+about the new token-pasting macros in scx_test.h.
+
+[1] https://lore.kernel.org/r/af2aD8-tFi_yhPOV@gpd4
+
+Cheng-Yang Chou (7):
+  selftests/sched_ext: Add test context helpers for skeleton and link
+  selftests/sched_ext: Fix bpf_link leaks on early return from run()
+  selftests/sched_ext: Fix scheduler leaks on early return in test
+    helpers
+  selftests/sched_ext: Reap every child in select_cpu_dfl before
+    reporting
+  selftests/sched_ext: Fix peek_dsq runner crash and link leak on
+    failure
+  selftests/sched_ext: Fix scheduler leak on early return in
+    enable_cmask
+  selftests/sched_ext: Fail tests that leave a scheduler loaded
+
+ .../selftests/sched_ext/ddsp_bogus_dsq_fail.c |  30 +---
+ .../sched_ext/ddsp_vtimelocal_fail.c          |  30 +---
+ tools/testing/selftests/sched_ext/dequeue.c   |  31 ++--
+ .../selftests/sched_ext/enable_cmask.c        |  62 ++++++--
+ .../sched_ext/enq_last_no_enq_fails.c         |  37 +----
+ .../selftests/sched_ext/enq_select_cpu.c      |  35 +---
+ tools/testing/selftests/sched_ext/exit.c      |  80 +++++++---
+ tools/testing/selftests/sched_ext/hotplug.c   |  45 ++++--
+ .../selftests/sched_ext/init_enable_count.c   | 149 ++++++++++++------
+ tools/testing/selftests/sched_ext/numa.c      |  33 ++--
+ tools/testing/selftests/sched_ext/peek_dsq.c  |  13 +-
+ tools/testing/selftests/sched_ext/runner.c    |  38 ++++-
+ tools/testing/selftests/sched_ext/scx_test.h  |  90 +++++++++++
+ .../selftests/sched_ext/select_cpu_dfl.c      |  51 +-----
+ .../sched_ext/select_cpu_dfl_nodispatch.c     |  45 ++----
+ .../selftests/sched_ext/select_cpu_dispatch.c |  42 ++---
+ .../sched_ext/select_cpu_dispatch_bad_dsq.c   |  30 +---
+ .../sched_ext/select_cpu_dispatch_dbl_dsp.c   |  30 +---
+ .../selftests/sched_ext/select_cpu_vtime.c    |  33 +---
+ 19 files changed, 464 insertions(+), 440 deletions(-)
+
+
+base-commit: 9fa10e3bc7ec61010aa91cfca6118218e3bab773
+-- 
+2.55.0
+

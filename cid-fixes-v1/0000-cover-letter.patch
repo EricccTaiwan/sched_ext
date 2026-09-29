@@ -1,0 +1,61 @@
+From a1f6bd2ab23f26c52eb9bfe65e4eebfd74a141bb Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Tue, 29 Sep 2026 02:38:27 +0000
+Subject: [PATCH sched_ext/for-7.3-fixes 0/2] sched_ext: Fix two cid bugs that can crash the kernel or block loading
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+Two independent fixes for cid code that is already in mainline (v7.2).
+Neither depends on the other.
+
+  1: The kernel keeps three cmasks in the BPF scheduler's arena (the
+     per-cpu set_cmask scratch, the online cid mask and the
+     sub_caps_updated output). The BPF scheduler can free those pages
+     with bpf_arena_free_pages(), and the next kernel write to them
+     (a set_cpumask, a hotplug event, a caps update) oopses the kernel.
+     Access them with copy_{from,to}_kernel_nofault() instead and abort
+     the scheduler with scx_error() when the pages are gone.
+
+  2: When cacheinfo detection fails for a CPU, its LLC shared_cpu_map is
+     empty, scx_cid_init() hits a WARN and returns -EINVAL, and no
+     scheduler can be loaded, cpu-form ones included. Use the LLC map
+     only when cacheinfo is populated and contains the CPU, and fall
+     back to the node mask otherwise.
+
+Tested with vng on for-7.3-fixes. Without the patches, a BPF scheduler
+that frees the set_cpumask scratch pages or the online cmask pages
+panics the kernel from scx_call_op_set_cpumask() and handle_hotplug()
+respectively, and forcing a cacheinfo failure on CPU 0 makes
+scx_root_enable() fail with -22. With the patches, the first two only
+abort the scheduler and the next one loads normally, and the third
+loads using the node mask. The full selftests pass (nohz_tick skipped),
+and scx_qmap with a sub-scheduler, affinity changes and CPU hotplug
+runs without a BUG or WARN. The failure path in the sub-scheduler caps
+update was checked by reading only.
+
+The cacheinfo failure does not happen on x86 by itself; it was injected.
+The realistic case is a DT or ACPI cacheinfo failure on arm64 or riscv.
+
+checkpatch --strict is clean on both patches.
+
+Cheng-Yang Chou (2):
+  sched_ext: Don't oops when BPF frees the arena pages of kernel cmasks
+  sched_ext: Fall back to the node mask when a CPU's LLC map is empty
+
+ kernel/sched/ext/cid.c | 143 +++++++++++++++++++++++++++++++++++------
+ kernel/sched/ext/cid.h |  11 ++--
+ kernel/sched/ext/ext.c |  26 +++++---
+ kernel/sched/ext/sub.c |  16 ++---
+ 4 files changed, 154 insertions(+), 42 deletions(-)
+
+
+base-commit: d35a535d3e3e71f92a051d94e415f43612c4edfc
+-- 
+2.55.0
+

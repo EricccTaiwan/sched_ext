@@ -1,0 +1,81 @@
+From a1f6bd2ab23f26c52eb9bfe65e4eebfd74a141bb Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Mon, 28 Sep 2026 19:26:07 +0000
+Subject: [PATCH sched_ext/for-7.3-fixes 2/2] sched_ext: Fall back to the node
+ mask when a CPU's LLC map is empty
+
+cpu_llc_mask() trusts the last cacheinfo leaf of a CPU as soon as the
+leaves are allocated. When cache detection fails, e.g. on arm64 or
+riscv with DT or ACPI cache descriptions cacheinfo can't use, the leaves
+stay allocated but the CPU's shared_cpu_map is left empty. If the
+topology walk in scx_cid_init() picks that CPU to represent its LLC, the
+LLC doesn't contain the CPU and the WARN_ON_ONCE() containment check
+fails. With a detection failure injected for CPU 0 on x86:
+
+  cacheinfo: Unable to detect cache hierarchy for CPU 0
+  WARNING: kernel/sched/ext/cid.c:266 at scx_cid_init.cold+0xa6d/0xc1c
+  sched_ext: minimal: scx_root_enable() failed (-22)
+
+scx_cid_init() runs for every root scheduler, cpu-form ones included,
+so no BPF scheduler can be loaded on such a machine.
+
+Use the LLC map only when cacheinfo reports it populated and it
+contains the CPU, and use the node mask otherwise as is already done
+for CPUs without cacheinfo.
+
+Fixes: e9b55af47edf ("sched_ext: Add topological CPU IDs (cids)")
+Cc: stable@vger.kernel.org # v7.2+
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ kernel/sched/ext/cid.c | 21 +++++++++++++--------
+ 1 file changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/ext/cid.c b/kernel/sched/ext/cid.c
+index d27f44bf331e..a83dc96bd54f 100644
+--- a/kernel/sched/ext/cid.c
++++ b/kernel/sched/ext/cid.c
+@@ -34,19 +34,24 @@ static struct scx_cid_tables *scx_cid_tables;	/* used only during alloc/free */
+ }
+ 
+ /*
+- * Return @cpu's LLC shared_cpu_map. If cacheinfo isn't populated (offline or
+- * !present), record @cpu in @fallbacks and return its node mask instead - the
+- * worst that can happen is that the cpu's LLC becomes coarser than reality.
++ * Return @cpu's LLC shared_cpu_map. If cacheinfo isn't populated, e.g. failed
++ * detection leaves the leaves allocated with an empty map, record @cpu in
++ * @fallbacks and return its node mask instead - the worst that can happen is
++ * that the LLC becomes coarser than reality, up to the whole node.
+  */
+ static const struct cpumask *cpu_llc_mask(int cpu, struct cpumask *fallbacks)
+ {
+ 	struct cpu_cacheinfo *ci = get_cpu_cacheinfo(cpu);
++	const struct cpumask *llc;
+ 
+-	if (!ci || !ci->info_list || !ci->num_leaves) {
+-		cpumask_set_cpu(cpu, fallbacks);
+-		return cpumask_of_node(cpu_to_node(cpu));
++	if (ci && ci->info_list && ci->num_leaves && ci->cpu_map_populated) {
++		llc = &ci->info_list[ci->num_leaves - 1].shared_cpu_map;
++		if (cpumask_test_cpu(cpu, llc))
++			return llc;
+ 	}
+-	return &ci->info_list[ci->num_leaves - 1].shared_cpu_map;
++
++	cpumask_set_cpu(cpu, fallbacks);
++	return cpumask_of_node(cpu_to_node(cpu));
+ }
+ 
+ /*
+@@ -362,7 +367,7 @@ s32 scx_cid_init(struct scx_sched *sch)
+ 	}
+ 
+ 	if (!cpumask_empty(llc_fallback))
+-		pr_warn("scx_cid: cpus without cacheinfo, using node mask as llc: %*pbl\n",
++		pr_warn("scx_cid: cpus without usable cacheinfo, using node mask as llc: %*pbl\n",
+ 			cpumask_pr_args(llc_fallback));
+ 	if (!cpumask_empty(online_no_topo))
+ 		pr_warn("scx_cid: online cpus with no usable topology: %*pbl\n",
+-- 
+2.55.0
+

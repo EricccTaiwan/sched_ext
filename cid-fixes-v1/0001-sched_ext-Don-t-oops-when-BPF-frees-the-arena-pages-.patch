@@ -1,0 +1,371 @@
+From fd1cf1b02e0744d4f1f6b0ff564edc4fce86c8ed Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Mon, 28 Sep 2026 19:12:13 +0000
+Subject: [PATCH sched_ext/for-7.3-fixes 1/2] sched_ext: Don't oops when BPF
+ frees the arena pages of kernel cmasks
+
+The kernel keeps cmasks of its own in the scheduler's arena: the per-cpu
+set_cmask scratch, the online cid mask and the sub_caps_updated output.
+They sit on ordinary arena pages, so the BPF scheduler can free them
+with bpf_arena_free_pages(), and it learns their addresses from
+ops.set_cmask(), ops.enable(), ops.sub_caps_updated() and
+scx_bpf_online_cmask().
+
+Arena fault recovery only covers accesses made with a BPF program on the
+stack. The kernel writes these cmasks on its own on affinity changes,
+task enable, CPU hotplug and caps delivery, so after such a free the
+next write oopses with the rq or hotplug locks held:
+
+  BUG: unable to handle page fault for address: ffffc900f9bb6000
+  RIP: 0010:scx_call_op_set_cpumask+0x2e3/0x800
+  Call Trace:
+   __set_cpus_allowed_ptr_locked+0x411/0x7b0
+   __set_cpus_allowed_ptr+0x17f/0x260
+   __sched_setaffinity+0x11e/0x290
+   sched_setaffinity+0x3ba/0x520
+
+Access these cmasks with copy_{from,to}_kernel_nofault() and abort the
+scheduler with scx_error() when a page is gone, as with any other
+scheduler bug. If BPF touches the freed page first, arena fault recovery
+maps its scratch page there and the kernel's later accesses land on it,
+which doesn't need handling either.
+
+Fixes: abdc2516f100 ("sched_ext: Convert ops.set_cmask() to arena-resident cmask")
+Fixes: 5f2a9a4c2e6c ("sched_ext: Add coalescing sub_caps_updated() notifier for sub-schedulers")
+Fixes: a9e3760b0838 ("sched_ext: Maintain an online cid mask in the scheduler arena")
+Cc: stable@vger.kernel.org # v7.2+
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ kernel/sched/ext/cid.c | 122 +++++++++++++++++++++++++++++++++++++----
+ kernel/sched/ext/cid.h |  11 ++--
+ kernel/sched/ext/ext.c |  26 +++++----
+ kernel/sched/ext/sub.c |  16 +++---
+ 4 files changed, 141 insertions(+), 34 deletions(-)
+
+diff --git a/kernel/sched/ext/cid.c b/kernel/sched/ext/cid.c
+index d4d5f537832a..d27f44bf331e 100644
+--- a/kernel/sched/ext/cid.c
++++ b/kernel/sched/ext/cid.c
+@@ -1008,6 +1008,95 @@ int scx_cmask_ref_init(struct scx_sched *sch, const struct scx_cmask *src,
+ 	return 0;
+ }
+ 
++/*
++ * The kernel keeps cmasks of its own in the arena, such as the set_cmask
++ * scratch. BPF can free the backing pages at any time with
++ * bpf_arena_free_pages(), and arena fault recovery only covers accesses made
++ * with a BPF prog on the stack. Access these cmasks with the nofault helpers
++ * below so that a freed page fails with -EFAULT instead of oopsing. If BPF
++ * touches the freed page first, the fault recovery maps the arena's scratch
++ * page there and later kernel accesses land on it without failing.
++ */
++static int arena_read_u64(const u64 *p, u64 *val)
++{
++	return copy_from_kernel_nofault(val, p, sizeof(*val));
++}
++
++static int arena_write_u64(u64 *p, u64 val)
++{
++	return copy_to_kernel_nofault(p, &val, sizeof(val));
++}
++
++static int arena_write_u32(u32 *p, u32 val)
++{
++	return copy_to_kernel_nofault(p, &val, sizeof(val));
++}
++
++/**
++ * scx_arena_cmask_init - Initialize a kernel-owned arena cmask
++ * @m: kernel address of the cmask, storage sized for @nr_cids
++ * @base: first cid of the active range
++ * @nr_cids: number of cids in the active range
++ *
++ * scx_cmask_init() for a cmask in the arena. Return 0 on success, -EFAULT if
++ * the backing page has been freed.
++ */
++int scx_arena_cmask_init(struct scx_cmask *m, u32 base, u32 nr_cids)
++{
++	u32 wi, nr_words = SCX_CMASK_NR_WORDS(nr_cids);
++
++	if (arena_write_u32(&m->base, base) ||
++	    arena_write_u32(&m->nr_cids, nr_cids) ||
++	    arena_write_u32(&m->alloc_words, nr_words))
++		return -EFAULT;
++
++	for (wi = 0; wi < nr_words; wi++)
++		if (arena_write_u64(&m->bits[wi], 0))
++			return -EFAULT;
++	return 0;
++}
++
++/**
++ * scx_arena_cmask_assign - Set or clear @cid in a kernel-owned arena cmask
++ * @m: kernel address of the cmask, whose active range starts at cid 0
++ * @cid: cid to update
++ * @val: whether to set or clear @cid
++ *
++ * Return 0 on success, -EFAULT if the backing page has been freed.
++ */
++int scx_arena_cmask_assign(struct scx_cmask *m, u32 cid, bool val)
++{
++	u64 *word = &m->bits[cid / 64];
++	u64 w;
++
++	if (arena_read_u64(word, &w))
++		return -EFAULT;
++	if (val)
++		w |= BIT_U64(cid & 63);
++	else
++		w &= ~BIT_U64(cid & 63);
++	return arena_write_u64(word, w) ? -EFAULT : 0;
++}
++
++/**
++ * scx_arena_cmask_copy - Copy @src into a kernel-owned arena cmask
++ * @dst: kernel address of the cmask, storage sized for @src's active range
++ * @src: stable kernel cmask
++ *
++ * Rewrite @dst's header from @src's geometry and copy the active range's words.
++ * Return 0 on success, -EFAULT if the backing page has been freed.
++ */
++int scx_arena_cmask_copy(struct scx_cmask *dst, const struct scx_cmask *src)
++{
++	if (arena_write_u32(&dst->base, src->base) ||
++	    arena_write_u32(&dst->nr_cids, src->nr_cids) ||
++	    arena_write_u32(&dst->alloc_words, SCX_CMASK_NR_WORDS(src->nr_cids)) ||
++	    copy_to_kernel_nofault(dst->bits, src->bits,
++				   scx_cmask_nr_used_words(src) * sizeof(u64)))
++		return -EFAULT;
++	return 0;
++}
++
+ /**
+  * scx_cmask_ref_init_kern - Bind a scx_cmask_ref to a kernel-owned cmask
+  * @sch: scheduler the cmask belongs to
+@@ -1020,15 +1109,20 @@ int scx_cmask_ref_init(struct scx_sched *sch, const struct scx_cmask *src,
+  * read from @m's header, so a concurrent BPF write to the header can't steer
+  * later sizing or offsets. Rewrite the header from the trusted geometry and
+  * bind @ref to it.
++ *
++ * @ref is bound even on failure. Return 0 on success, -EFAULT if @m's backing
++ * page has been freed.
+  */
+-void scx_cmask_ref_init_kern(struct scx_sched *sch, struct scx_cmask *m,
+-			     u32 base, u32 nr_cids, struct scx_cmask_ref *ref)
++int scx_cmask_ref_init_kern(struct scx_sched *sch, struct scx_cmask *m,
++			    u32 base, u32 nr_cids, struct scx_cmask_ref *ref)
+ {
+ 	s32 *cid_to_shard;
++	int ret = 0;
+ 
+-	WRITE_ONCE(m->base, base);
+-	WRITE_ONCE(m->nr_cids, nr_cids);
+-	WRITE_ONCE(m->alloc_words, SCX_CMASK_NR_WORDS(nr_cids));
++	if (arena_write_u32(&m->base, base) ||
++	    arena_write_u32(&m->nr_cids, nr_cids) ||
++	    arena_write_u32(&m->alloc_words, SCX_CMASK_NR_WORDS(nr_cids)))
++		ret = -EFAULT;
+ 
+ 	ref->sch = sch;
+ 	ref->src = m;
+@@ -1041,6 +1135,8 @@ void scx_cmask_ref_init_kern(struct scx_sched *sch, struct scx_cmask *m,
+ 		ref->shard_end = cid_to_shard[base + nr_cids - 1] + 1;
+ 	else
+ 		ref->shard_end = ref->shard_first;
++
++	return ret;
+ }
+ 
+ /**
+@@ -1131,19 +1227,19 @@ void scx_cmask_ref_copy(const struct scx_cmask_ref *ref, const struct scx_cmask
+  * @cpumask: cpus to translate into cids
+  *
+  * Write @ref's active range one word at a time, setting each cid's bit when
+- * its cpu is in @cpumask. Offsets and length come from @ref's trusted geometry
+- * and stores use WRITE_ONCE since BPF may read concurrently, so the arena
+- * header is never read.
++ * its cpu is in @cpumask. Offsets and length come from @ref's trusted geometry,
++ * so the arena header is never read. Return 0 on success, -EFAULT if @ref's
++ * backing page has been freed.
+  */
+-void scx_cmask_ref_from_cpumask(const struct scx_cmask_ref *ref,
+-				const struct cpumask *cpumask)
++int scx_cmask_ref_from_cpumask(const struct scx_cmask_ref *ref,
++			       const struct cpumask *cpumask)
+ {
+ 	struct scx_cmask *m = ref->src;
+ 	u32 base = ref->base, nr_cids = ref->nr_cids;
+ 	u32 wi, nr_words;
+ 
+ 	if (!nr_cids)
+-		return;
++		return 0;
+ 
+ 	nr_words = (base + nr_cids - 1) / 64 - base / 64 + 1;
+ 	for (wi = 0; wi < nr_words; wi++) {
+@@ -1159,8 +1255,10 @@ void scx_cmask_ref_from_cpumask(const struct scx_cmask_ref *ref,
+ 			if (cpumask_test_cpu(__scx_cid_to_cpu(cid), cpumask))
+ 				word |= BIT_U64(bit);
+ 		}
+-		WRITE_ONCE(m->bits[wi], word);
++		if (arena_write_u64(&m->bits[wi], word))
++			return -EFAULT;
+ 	}
++	return 0;
+ }
+ 
+ int scx_cid_kfunc_init(void)
+diff --git a/kernel/sched/ext/cid.h b/kernel/sched/ext/cid.h
+index 2fe2311a0f99..c41f5d9f75c7 100644
+--- a/kernel/sched/ext/cid.h
++++ b/kernel/sched/ext/cid.h
+@@ -312,13 +312,16 @@ static inline s32 scx_cpu_ret(struct scx_sched *sch, s32 cpu_or_cid)
+ 
+ int scx_cmask_ref_init(struct scx_sched *sch, const struct scx_cmask *src,
+ 		       struct scx_cmask_ref *ref);
+-void scx_cmask_ref_init_kern(struct scx_sched *sch, struct scx_cmask *m,
+-			     u32 base, u32 nr_cids, struct scx_cmask_ref *ref);
++int scx_cmask_ref_init_kern(struct scx_sched *sch, struct scx_cmask *m,
++			    u32 base, u32 nr_cids, struct scx_cmask_ref *ref);
+ void scx_cmask_ref_shard(const struct scx_cmask_ref *ref, s32 shard_idx,
+ 			 struct scx_cmask *out);
+-void scx_cmask_ref_from_cpumask(const struct scx_cmask_ref *ref,
+-				const struct cpumask *cpumask);
++int scx_cmask_ref_from_cpumask(const struct scx_cmask_ref *ref,
++			       const struct cpumask *cpumask);
+ void scx_cmask_ref_or(const struct scx_cmask_ref *ref, const struct scx_cmask *src);
+ void scx_cmask_ref_copy(const struct scx_cmask_ref *ref, const struct scx_cmask *src);
++int scx_arena_cmask_init(struct scx_cmask *m, u32 base, u32 nr_cids);
++int scx_arena_cmask_assign(struct scx_cmask *m, u32 cid, bool val);
++int scx_arena_cmask_copy(struct scx_cmask *dst, const struct scx_cmask *src);
+ 
+ #endif /* _KERNEL_SCHED_EXT_CID_H */
+diff --git a/kernel/sched/ext/ext.c b/kernel/sched/ext/ext.c
+index 493b7aac7087..c4c1ef6fcac5 100644
+--- a/kernel/sched/ext/ext.c
++++ b/kernel/sched/ext/ext.c
+@@ -454,7 +454,7 @@ DEFINE_STATIC_KEY_FALSE(__scx_is_cid_type);
+  * The scratch lives in BPF-writable arena memory and its header can't be
+  * trusted, so it is rewritten from kernel geometry rather than read. Caller
+  * must hold an rq lock so this cpu is the sole kernel writer for as long as the
+- * returned address is in use.
++ * returned address is in use. If BPF has freed the backing page, abort @sch.
+  */
+ static struct scx_cmask *scx_fill_cmask_scratch(struct scx_sched *sch,
+ 						const struct cpumask *cpumask)
+@@ -462,8 +462,9 @@ static struct scx_cmask *scx_fill_cmask_scratch(struct scx_sched *sch,
+ 	struct scx_cmask *kern_va = *this_cpu_ptr(sch->set_cmask_scratch);
+ 	struct scx_cmask_ref ref;
+ 
+-	scx_cmask_ref_init_kern(sch, kern_va, 0, num_possible_cpus(), &ref);
+-	scx_cmask_ref_from_cpumask(&ref, cpumask);
++	if (scx_cmask_ref_init_kern(sch, kern_va, 0, num_possible_cpus(), &ref) ||
++	    scx_cmask_ref_from_cpumask(&ref, cpumask))
++		scx_error(sch, "set_cmask scratch in the arena is inaccessible");
+ 	return kern_va;
+ }
+ 
+@@ -3696,9 +3697,8 @@ static void handle_hotplug(struct rq *rq, bool online)
+ 			list_for_each_entry(pos, &scx_sched_all, all) {
+ 				struct scx_cmask *mask = pos->online_cmask;
+ 
+-				if (mask)
+-					__assign_bit(cpu_or_cid, (unsigned long *)mask->bits,
+-						     online);
++				if (mask && scx_arena_cmask_assign(mask, cpu_or_cid, online))
++					scx_error(pos, "online cmask in the arena is inaccessible");
+ 			}
+ 		}
+ 	}
+@@ -5366,7 +5366,7 @@ s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
+ 				    SCX_CMASK_NR_WORDS(num_possible_cpus()));
+ 	struct scx_cmask *online;
+ 	struct scx_cmask_ref ref;
+-	int cpu;
++	int cpu, ret;
+ 
+ 	/* hotplug stays excluded until the online mask is published */
+ 	lockdep_assert_cpus_held();
+@@ -5384,7 +5384,9 @@ s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
+ 		*slot = scx_arena_alloc(sch, size);
+ 		if (!*slot)
+ 			return -ENOMEM;
+-		scx_cmask_init(*slot, 0, num_possible_cpus());
++		ret = scx_arena_cmask_init(*slot, 0, num_possible_cpus());
++		if (ret)
++			return ret;
+ 	}
+ 
+ 	/* pack the online mask alongside the scratch masks */
+@@ -5393,8 +5395,12 @@ s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
+ 		return -ENOMEM;
+ 
+ 	scoped_guard(rcu) {
+-		scx_cmask_ref_init_kern(sch, online, 0, num_possible_cpus(), &ref);
+-		scx_cmask_ref_from_cpumask(&ref, cpu_active_mask);
++		ret = scx_cmask_ref_init_kern(sch, online, 0, num_possible_cpus(), &ref) ?:
++			scx_cmask_ref_from_cpumask(&ref, cpu_active_mask);
++	}
++	if (ret) {
++		scx_arena_free(sch, online, size);
++		return ret;
+ 	}
+ 	sch->online_cmask = online;
+ 
+diff --git a/kernel/sched/ext/sub.c b/kernel/sched/ext/sub.c
+index c9b44ab3bd0a..338f134e595c 100644
+--- a/kernel/sched/ext/sub.c
++++ b/kernel/sched/ext/sub.c
+@@ -172,13 +172,12 @@ static struct scx_pshard *alloc_pshard(struct scx_sched *sch, s32 shard_idx, s32
+ 	__scx_cmask_init(&cu->cmask, shard->base_cid, shard->nr_cids, SCX_CID_SHARD_MAX_CPUS);
+ 
+ 	cu->cmask_arena_out = scx_arena_alloc(sch, cmask_size);
+-	if (!cu->cmask_arena_out) {
++	if (!cu->cmask_arena_out ||
++	    scx_arena_cmask_init(cu->cmask_arena_out, shard->base_cid, shard->nr_cids)) {
+ 		free_pshard(pshard);
+ 		return NULL;
+ 	}
+ 
+-	scx_cmask_init(cu->cmask_arena_out, shard->base_cid, shard->nr_cids);
+-
+ 	return pshard;
+ }
+ 
+@@ -840,6 +839,7 @@ static void caps_updated_deliver(struct list_head *to_deliver)
+ 
+ 		while (true) {
+ 			u64 caps = 0;
++			int ret = 0;
+ 
+ 			/*
+ 			 * During enable, has_op is set after ops.sub_attach(),
+@@ -851,12 +851,8 @@ static void caps_updated_deliver(struct list_head *to_deliver)
+ 			scoped_guard (raw_spinlock, &cu->lock) {
+ 				if (cu->caps && SCX_HAS_OP(sch, sub_caps_updated) &&
+ 				    likely(!READ_ONCE(sch->aborting))) {
+-					struct scx_cmask_ref ref;
+-
+ 					caps = cu->caps;
+-					scx_cmask_ref_init_kern(sch, cu->cmask_arena_out,
+-								ps->base, ps->nr_cids, &ref);
+-					scx_cmask_ref_copy(&ref, &cu->cmask);
++					ret = scx_arena_cmask_copy(cu->cmask_arena_out, &cu->cmask);
+ 					scx_cmask_clear(&cu->cmask);
+ 					cu->caps = 0;
+ 				} else {
+@@ -865,6 +861,10 @@ static void caps_updated_deliver(struct list_head *to_deliver)
+ 			}
+ 			if (!caps)
+ 				break;
++			if (ret) {
++				scx_error(sch, "caps_updated cmask in the arena is inaccessible");
++				continue;
++			}
+ 
+ 			/* caps != 0 only when deliverable (has_op, above) */
+ 			SCX_CALL_OP(sch, sub_caps_updated, NULL, cu->cmask_arena_out, caps);
+-- 
+2.55.0
+

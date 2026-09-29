@@ -1,0 +1,80 @@
+From 22a726b15068acddf2a6313e46fe9f2396f13392 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Sat, 26 Sep 2026 20:04:47 +0000
+Subject: [PATCH sched_ext/for-7.4 7/7] selftests/sched_ext: Fail tests that
+ leave a scheduler loaded
+
+A test that leaves its BPF scheduler loaded does not fail itself. The
+tests that run after it fail to attach instead, which points at the
+wrong test.
+
+Check /sys/kernel/sched_ext/state after each test and fail the one that
+left a scheduler loaded, naming it. Unregistering a scheduler waits for
+it to be disabled, so the state is final once the test returns. Tests
+that start with a scheduler already loaded are not checked.
+
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/runner.c | 38 +++++++++++++++++-----
+ 1 file changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/tools/testing/selftests/sched_ext/runner.c b/tools/testing/selftests/sched_ext/runner.c
+index 57dda75384f1..d516d159f106 100644
+--- a/tools/testing/selftests/sched_ext/runner.c
++++ b/tools/testing/selftests/sched_ext/runner.c
+@@ -85,21 +85,43 @@ static bool should_skip_test(const struct scx_test *test, const char * filter)
+ 	return !strstr(test->name, filter);
+ }
+ 
++/* Whether a BPF scheduler is loaded, false if sched_ext is unavailable */
++static bool scx_sched_loaded(void)
++{
++	char buf[16] = "";
++	FILE *f;
++
++	f = fopen("/sys/kernel/sched_ext/state", "r");
++	if (!f)
++		return false;
++	if (!fgets(buf, sizeof(buf), f))
++		buf[0] = '\0';
++	fclose(f);
++
++	return buf[0] && strcmp(buf, "disabled\n");
++}
++
+ static enum scx_test_status run_test(const struct scx_test *test)
+ {
+-	enum scx_test_status status;
++	enum scx_test_status status = SCX_TEST_PASS;
++	bool was_loaded = scx_sched_loaded();
+ 	void *context = NULL;
+ 
+-	if (test->setup) {
++	if (test->setup)
+ 		status = test->setup(&context);
+-		if (status != SCX_TEST_PASS)
+-			return status;
+-	}
+ 
+-	status = test->run(context);
++	if (status == SCX_TEST_PASS) {
++		status = test->run(context);
+ 
+-	if (test->cleanup)
+-		test->cleanup(context);
++		if (test->cleanup)
++			test->cleanup(context);
++	}
++
++	/* Unregistering waits for the disable, so the state is final here */
++	if (!was_loaded && scx_sched_loaded()) {
++		fprintf(stderr, "ERR: %s left a BPF scheduler loaded\n", test->name);
++		status = SCX_TEST_FAIL;
++	}
+ 
+ 	return status;
+ }
+-- 
+2.55.0
+
