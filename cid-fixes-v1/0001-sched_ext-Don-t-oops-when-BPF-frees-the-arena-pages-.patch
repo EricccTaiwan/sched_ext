@@ -1,4 +1,4 @@
-From fd1cf1b02e0744d4f1f6b0ff564edc4fce86c8ed Mon Sep 17 00:00:00 2001
+From 8a40e8b3acae4cd4a3c816b7c474de87873640cd Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Mon, 28 Sep 2026 19:12:13 +0000
 Subject: [PATCH sched_ext/for-7.3-fixes 1/2] sched_ext: Don't oops when BPF
@@ -30,6 +30,10 @@ scheduler bug. If BPF touches the freed page first, arena fault recovery
 maps its scratch page there and the kernel's later accesses land on it,
 which doesn't need handling either.
 
+The set_cmask scratch has been in the arena since v7.2, while the online
+mask and the sub_caps_updated output only exist in v7.3. A v7.2.y
+backport therefore needs only the set_cmask part.
+
 Fixes: abdc2516f100 ("sched_ext: Convert ops.set_cmask() to arena-resident cmask")
 Fixes: 5f2a9a4c2e6c ("sched_ext: Add coalescing sub_caps_updated() notifier for sub-schedulers")
 Fixes: a9e3760b0838 ("sched_ext: Maintain an online cid mask in the scheduler arena")
@@ -37,11 +41,12 @@ Cc: stable@vger.kernel.org # v7.2+
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- kernel/sched/ext/cid.c | 122 +++++++++++++++++++++++++++++++++++++----
- kernel/sched/ext/cid.h |  11 ++--
- kernel/sched/ext/ext.c |  26 +++++----
- kernel/sched/ext/sub.c |  16 +++---
- 4 files changed, 141 insertions(+), 34 deletions(-)
+ kernel/sched/ext/cid.c      | 122 ++++++++++++++++++++++++++++++++----
+ kernel/sched/ext/cid.h      |  11 ++--
+ kernel/sched/ext/ext.c      |  29 +++++----
+ kernel/sched/ext/internal.h |   4 +-
+ kernel/sched/ext/sub.c      |  16 ++---
+ 5 files changed, 146 insertions(+), 36 deletions(-)
 
 diff --git a/kernel/sched/ext/cid.c b/kernel/sched/ext/cid.c
 index d4d5f537832a..d27f44bf331e 100644
@@ -242,7 +247,7 @@ index 2fe2311a0f99..c41f5d9f75c7 100644
  
  #endif /* _KERNEL_SCHED_EXT_CID_H */
 diff --git a/kernel/sched/ext/ext.c b/kernel/sched/ext/ext.c
-index 493b7aac7087..c4c1ef6fcac5 100644
+index 493b7aac7087..8b48725f144d 100644
 --- a/kernel/sched/ext/ext.c
 +++ b/kernel/sched/ext/ext.c
 @@ -454,7 +454,7 @@ DEFINE_STATIC_KEY_FALSE(__scx_is_cid_type);
@@ -313,6 +318,31 @@ index 493b7aac7087..c4c1ef6fcac5 100644
  	}
  	sch->online_cmask = online;
  
+@@ -10452,7 +10458,8 @@ __bpf_kfunc u32 scx_bpf_nr_online_cids(void)
+  * Return a kernel-maintained cmask covering [0, scx_bpf_nr_cids()), or NULL if
+  * the calling program is not associated with a live cid-form scheduler or the
+  * mask is not allocated yet, as in ops.init_cids(). Treat the mask as read-only
+- * even though arena memory stays writable by the BPF scheduler. The mask
++ * even though arena memory stays writable by the BPF scheduler, and don't free
++ * its pages, which aborts the scheduler on the next update. The mask
+  * follows the SCX hotplug notifications: a cid's bit is updated before
+  * ops.cid_online/offline() runs for it. The pointer is valid from ops.init()
+  * through ops.exit(). Root ops.init() runs with hotplug excluded. Other
+diff --git a/kernel/sched/ext/internal.h b/kernel/sched/ext/internal.h
+index 1df8f583b0ec..0dd3e6874c71 100644
+--- a/kernel/sched/ext/internal.h
++++ b/kernel/sched/ext/internal.h
+@@ -1585,7 +1585,9 @@ struct scx_sched {
+ 	/*
+ 	 * Per-CPU arena cmask the kernel fills from a task's cpumask and hands
+ 	 * to ops_cid.enable() and ops_cid.set_cmask(). The stored pointers are
+-	 * the kernel addresses.
++	 * the kernel addresses. BPF can free the backing pages, so the kernel
++	 * accesses them with the nofault helpers and aborts the scheduler when
++	 * a page is gone.
+ 	 */
+ 	struct scx_cmask * __percpu *set_cmask_scratch;
+ 	struct scx_cmask *online_cmask;
 diff --git a/kernel/sched/ext/sub.c b/kernel/sched/ext/sub.c
 index c9b44ab3bd0a..338f134e595c 100644
 --- a/kernel/sched/ext/sub.c

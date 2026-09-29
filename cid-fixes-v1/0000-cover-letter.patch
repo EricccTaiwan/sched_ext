@@ -1,4 +1,4 @@
-From a1f6bd2ab23f26c52eb9bfe65e4eebfd74a141bb Mon Sep 17 00:00:00 2001
+From dea1437d537e1a9e2c1126b48e37bedb45fa6a9b Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Tue, 29 Sep 2026 02:38:27 +0000
 Subject: [PATCH sched_ext/for-7.3-fixes 0/2] sched_ext: Fix two cid bugs that can crash the kernel or block loading
@@ -48,11 +48,12 @@ Cheng-Yang Chou (2):
   sched_ext: Don't oops when BPF frees the arena pages of kernel cmasks
   sched_ext: Fall back to the node mask when a CPU's LLC map is empty
 
- kernel/sched/ext/cid.c | 143 +++++++++++++++++++++++++++++++++++------
- kernel/sched/ext/cid.h |  11 ++--
- kernel/sched/ext/ext.c |  26 +++++---
- kernel/sched/ext/sub.c |  16 ++---
- 4 files changed, 154 insertions(+), 42 deletions(-)
+ kernel/sched/ext/cid.c      | 143 +++++++++++++++++++++++++++++++-----
+ kernel/sched/ext/cid.h      |  11 ++-
+ kernel/sched/ext/ext.c      |  29 +++++---
+ kernel/sched/ext/internal.h |   4 +-
+ kernel/sched/ext/sub.c      |  16 ++--
+ 5 files changed, 159 insertions(+), 44 deletions(-)
 
 
 base-commit: d35a535d3e3e71f92a051d94e415f43612c4edfc

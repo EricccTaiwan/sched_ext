@@ -1,4 +1,4 @@
-From a1f6bd2ab23f26c52eb9bfe65e4eebfd74a141bb Mon Sep 17 00:00:00 2001
+From dea1437d537e1a9e2c1126b48e37bedb45fa6a9b Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Mon, 28 Sep 2026 19:26:07 +0000
 Subject: [PATCH sched_ext/for-7.3-fixes 2/2] sched_ext: Fall back to the node
@@ -13,7 +13,7 @@ LLC doesn't contain the CPU and the WARN_ON_ONCE() containment check
 fails. With a detection failure injected for CPU 0 on x86:
 
   cacheinfo: Unable to detect cache hierarchy for CPU 0
-  WARNING: kernel/sched/ext/cid.c:266 at scx_cid_init.cold+0xa6d/0xc1c
+  WARNING: kernel/sched/ext/cid.c:262 at scx_cid_init.cold+0xa6d/0xc1c
   sched_ext: minimal: scx_root_enable() failed (-22)
 
 scx_cid_init() runs for every root scheduler, cpu-form ones included,
