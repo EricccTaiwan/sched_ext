@@ -1,4 +1,4 @@
-From 543fa6eeef63ae84e0327e71e2a997d04445d01d Mon Sep 17 00:00:00 2001
+From 14f008ff931534049d553b35a6d7ee9d1b5cd750 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
 Subject: [PATCH sched_ext/for-7.4 2/7] selftests/sched_ext: Fix bpf_link leaks
@@ -16,22 +16,21 @@ Fixes: a5db7817af78 ("sched_ext: Add selftests")
 Fixes: 36adf6fe6cbe ("selftests/sched_ext: Update test enq_select_cpu_fails")
 Fixes: 5ae5161820e5 ("selftests/sched_ext: Add NUMA-aware scheduler test")
 Fixes: c31f2ee5cd7d ("sched_ext: Fix enq_last_no_enq_fails selftest")
-Assisted-by: Claude:claude-opus-5
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  .../selftests/sched_ext/ddsp_bogus_dsq_fail.c | 30 ++-----------
  .../sched_ext/ddsp_vtimelocal_fail.c          | 30 ++-----------
- .../sched_ext/enq_last_no_enq_fails.c         | 37 ++-------------
+ .../sched_ext/enq_last_no_enq_fails.c         | 37 ++--------------
  .../selftests/sched_ext/enq_select_cpu.c      | 35 +++------------
  tools/testing/selftests/sched_ext/numa.c      | 33 +++++---------
  .../selftests/sched_ext/select_cpu_dfl.c      | 43 +-----------------
- .../sched_ext/select_cpu_dfl_nodispatch.c     | 45 +++++++------------
- .../selftests/sched_ext/select_cpu_dispatch.c | 42 ++++++-----------
+ .../sched_ext/select_cpu_dfl_nodispatch.c     | 44 ++++++-------------
+ .../selftests/sched_ext/select_cpu_dispatch.c | 41 ++++++-----------
  .../sched_ext/select_cpu_dispatch_bad_dsq.c   | 30 ++-----------
  .../sched_ext/select_cpu_dispatch_dbl_dsp.c   | 30 ++-----------
  .../selftests/sched_ext/select_cpu_vtime.c    | 33 +++-----------
- 11 files changed, 73 insertions(+), 315 deletions(-)
+ 11 files changed, 71 insertions(+), 315 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c b/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c
 index b6d13496b24e..d1bec68046c4 100644
@@ -388,7 +387,7 @@ index 7e342c0cec65..5b5006d4ee62 100644
  	.name = "select_cpu_dfl",
  	.description = "Verify the default ops.select_cpu() dispatches tasks "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c b/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c
-index 9b5d232efb7f..d430b41c9acd 100644
+index 9b5d232efb7f..21d400b34292 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c
 @@ -13,29 +13,15 @@
@@ -425,7 +424,7 @@ index 9b5d232efb7f..d430b41c9acd 100644
  
  	for (i = 0; i < NUM_CHILDREN; i++) {
  		pids[i] = fork();
-@@ -43,27 +29,26 @@ static enum scx_test_status run(void *ctx)
+@@ -43,27 +29,25 @@ static enum scx_test_status run(void *ctx)
  			sleep(1);
  			exit(0);
  		}
@@ -446,8 +445,7 @@ index 9b5d232efb7f..d430b41c9acd 100644
 -	SCX_ASSERT(skel->bss->saw_local);
 -
 -	bpf_link__destroy(link);
-+	/* With this many children, some forks may fail on a loaded machine */
-+	SCX_GT(nforked, 0);
++	SCX_EQ(nforked, NUM_CHILDREN);
 +	SCX_EQ(nfailed, 0);
 +	SCX_ASSERT(tctx->skel->bss->saw_local);
  
@@ -465,7 +463,7 @@ index 9b5d232efb7f..d430b41c9acd 100644
  	.name = "select_cpu_dfl_nodispatch",
  	.description = "Verify behavior of scx_bpf_select_cpu_dfl() in "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
-index 80283dbc41b7..6d98f11b1d9b 100644
+index 80283dbc41b7..16770f482fd8 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
 @@ -13,29 +13,15 @@
@@ -502,7 +500,7 @@ index 80283dbc41b7..6d98f11b1d9b 100644
  
  	for (i = 0; i < NUM_CHILDREN; i++) {
  		pids[i] = fork();
-@@ -43,25 +29,25 @@ static enum scx_test_status run(void *ctx)
+@@ -43,25 +29,24 @@ static enum scx_test_status run(void *ctx)
  			sleep(1);
  			exit(0);
  		}
@@ -521,8 +519,7 @@ index 80283dbc41b7..6d98f11b1d9b 100644
  	}
  
 -	bpf_link__destroy(link);
-+	/* With this many children, some forks may fail on a loaded machine */
-+	SCX_GT(nforked, 0);
++	SCX_EQ(nforked, NUM_CHILDREN);
 +	SCX_EQ(nfailed, 0);
  
  	return SCX_TEST_PASS;

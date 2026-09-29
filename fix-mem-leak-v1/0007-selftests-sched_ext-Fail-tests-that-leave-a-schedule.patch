@@ -1,4 +1,4 @@
-From 22a726b15068acddf2a6313e46fe9f2396f13392 Mon Sep 17 00:00:00 2001
+From 10b6d1ab7c14f0c3c1907ff8e00d664ba15fb659 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Sat, 26 Sep 2026 20:04:47 +0000
 Subject: [PATCH sched_ext/for-7.4 7/7] selftests/sched_ext: Fail tests that
@@ -16,14 +16,14 @@ that start with a scheduler already loaded are not checked.
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- tools/testing/selftests/sched_ext/runner.c | 38 +++++++++++++++++-----
- 1 file changed, 30 insertions(+), 8 deletions(-)
+ tools/testing/selftests/sched_ext/runner.c | 39 +++++++++++++++++-----
+ 1 file changed, 31 insertions(+), 8 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/runner.c b/tools/testing/selftests/sched_ext/runner.c
-index 57dda75384f1..d516d159f106 100644
+index 57dda75384f1..9b90ac0fc7b3 100644
 --- a/tools/testing/selftests/sched_ext/runner.c
 +++ b/tools/testing/selftests/sched_ext/runner.c
-@@ -85,21 +85,43 @@ static bool should_skip_test(const struct scx_test *test, const char * filter)
+@@ -85,21 +85,44 @@ static bool should_skip_test(const struct scx_test *test, const char * filter)
  	return !strstr(test->name, filter);
  }
  
@@ -69,6 +69,7 @@ index 57dda75384f1..d516d159f106 100644
 +
 +	/* Unregistering waits for the disable, so the state is final here */
 +	if (!was_loaded && scx_sched_loaded()) {
++		fflush(stdout);
 +		fprintf(stderr, "ERR: %s left a BPF scheduler loaded\n", test->name);
 +		status = SCX_TEST_FAIL;
 +	}

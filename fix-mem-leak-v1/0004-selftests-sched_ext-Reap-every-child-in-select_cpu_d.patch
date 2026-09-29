@@ -1,4 +1,4 @@
-From 4e45256155a8843f9dfe09500d5dcc7c6f8626b4 Mon Sep 17 00:00:00 2001
+From f749cfa5c43f356229f795055c7f7e5115f46c35 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
 Subject: [PATCH sched_ext/for-7.4 4/7] selftests/sched_ext: Reap every child
@@ -10,7 +10,7 @@ behind as zombies. Count the failures and report them once every child
 has been reaped.
 
 Fixes: a5db7817af78 ("sched_ext: Add selftests")
-Assisted-by: Claude:claude-opus-5
+Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/select_cpu_dfl.c | 8 +++++---

@@ -1,4 +1,4 @@
-From 22a726b15068acddf2a6313e46fe9f2396f13392 Mon Sep 17 00:00:00 2001
+From 10b6d1ab7c14f0c3c1907ff8e00d664ba15fb659 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Tue, 29 Sep 2026 02:38:27 +0000
 Subject: [PATCH sched_ext/for-7.4 0/7] selftests/sched_ext: Fix scheduler leaks on early return
@@ -62,19 +62,19 @@ Cheng-Yang Chou (7):
  .../sched_ext/enq_last_no_enq_fails.c         |  37 +----
  .../selftests/sched_ext/enq_select_cpu.c      |  35 +---
  tools/testing/selftests/sched_ext/exit.c      |  80 +++++++---
- tools/testing/selftests/sched_ext/hotplug.c   |  45 ++++--
+ tools/testing/selftests/sched_ext/hotplug.c   |  69 +++++---
  .../selftests/sched_ext/init_enable_count.c   | 149 ++++++++++++------
  tools/testing/selftests/sched_ext/numa.c      |  33 ++--
  tools/testing/selftests/sched_ext/peek_dsq.c  |  13 +-
- tools/testing/selftests/sched_ext/runner.c    |  38 ++++-
+ tools/testing/selftests/sched_ext/runner.c    |  39 ++++-
  tools/testing/selftests/sched_ext/scx_test.h  |  90 +++++++++++
  .../selftests/sched_ext/select_cpu_dfl.c      |  51 +-----
- .../sched_ext/select_cpu_dfl_nodispatch.c     |  45 ++----
- .../selftests/sched_ext/select_cpu_dispatch.c |  42 ++---
+ .../sched_ext/select_cpu_dfl_nodispatch.c     |  44 ++----
+ .../selftests/sched_ext/select_cpu_dispatch.c |  41 ++---
  .../sched_ext/select_cpu_dispatch_bad_dsq.c   |  30 +---
  .../sched_ext/select_cpu_dispatch_dbl_dsp.c   |  30 +---
  .../selftests/sched_ext/select_cpu_vtime.c    |  33 +---
- 19 files changed, 464 insertions(+), 440 deletions(-)
+ 19 files changed, 476 insertions(+), 451 deletions(-)
 
 
 base-commit: 9fa10e3bc7ec61010aa91cfca6118218e3bab773

@@ -1,4 +1,4 @@
-From e1185a091cbace55362bc2bdee4da7573249c361 Mon Sep 17 00:00:00 2001
+From cafbe01418d415effb49c4f2e84a8dd34bf0af5f Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
 Subject: [PATCH sched_ext/for-7.4 1/7] selftests/sched_ext: Add test context
@@ -13,7 +13,7 @@ cleanup() tears down, as commit e18002d2c791 ("selftests/sched_ext:
 Fix select_cpu_dfl link leak on early return") did for one test. The
 next patch converts the affected tests.
 
-Assisted-by: Claude:claude-opus-5
+Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/scx_test.h | 90 ++++++++++++++++++++
