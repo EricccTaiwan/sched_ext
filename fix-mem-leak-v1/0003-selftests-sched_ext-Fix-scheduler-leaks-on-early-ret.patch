@@ -1,7 +1,7 @@
-From 9c430cf646d52ef570e0661d80117d1dc8a0adea Mon Sep 17 00:00:00 2001
+From 00b47828f8a2b8f35bb9206c86db597c9a87cba4 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:07 +0000
-Subject: [PATCH sched_ext/for-7.4 3/7] selftests/sched_ext: Fix scheduler
+Subject: [PATCH sched_ext/for-7.4 3/6] selftests/sched_ext: Fix scheduler
  leaks on early return in test helpers
 
 exit, hotplug and init_enable_count open the skeleton outside setup(),
@@ -12,17 +12,19 @@ teardown first, as commit e655c1f1bd14
 did, and let the wait loops reap every child before reporting.
 
 hotplug also calls UEI_REPORT(), which prints to stderr, only once.
+init_enable_count waits for its pre-forked children to exit while SIGCHLD
+is still ignored, so that none of them is left as a zombie.
 
 Fixes: a5db7817af78 ("sched_ext: Add selftests")
 Fixes: 658ad2259b3e ("selftests/sched_ext: Add test to validate ops.dequeue() semantics")
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- tools/testing/selftests/sched_ext/dequeue.c   |  31 ++--
- tools/testing/selftests/sched_ext/exit.c      |  80 +++++++---
+ tools/testing/selftests/sched_ext/dequeue.c   |  31 +++-
+ tools/testing/selftests/sched_ext/exit.c      |  80 ++++++---
  tools/testing/selftests/sched_ext/hotplug.c   |  69 +++++---
- .../selftests/sched_ext/init_enable_count.c   | 149 ++++++++++++------
- 4 files changed, 229 insertions(+), 100 deletions(-)
+ .../selftests/sched_ext/init_enable_count.c   | 162 +++++++++++++-----
+ 4 files changed, 241 insertions(+), 101 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/dequeue.c b/tools/testing/selftests/sched_ext/dequeue.c
 index 383d06e972a4..50e2358083bf 100644
@@ -326,13 +328,25 @@ index 10b8d42bd89b..1d12b3fcd703 100644
  	status = SCX_TEST_PASS;
  out_destroy_link:
 diff --git a/tools/testing/selftests/sched_ext/init_enable_count.c b/tools/testing/selftests/sched_ext/init_enable_count.c
-index 44577e30e764..18a28617005c 100644
+index 44577e30e764..4c8e1b93593a 100644
 --- a/tools/testing/selftests/sched_ext/init_enable_count.c
 +++ b/tools/testing/selftests/sched_ext/init_enable_count.c
-@@ -16,26 +16,68 @@
+@@ -16,26 +16,80 @@
  
  #define SCHED_EXT 7
  
++/*
++ * With SIGCHLD ignored, waitpid() blocks until every child has exited and been
++ * auto-reaped, then fails with ECHILD. Only then restore the default, or the
++ * children that are still exiting would be left as zombies.
++ */
++static void reap_prefork_children(void)
++{
++	while (waitpid(-1, NULL, 0) > 0)
++		;
++	signal(SIGCHLD, SIG_DFL);
++}
++
 +/* In helpers, so a failing SCX_*() check cannot skip run_test()'s teardown */
 +static enum scx_test_status check_pre_fork_counts(const struct init_enable_count *skel,
 +						  u32 num_pre_forks)
@@ -404,7 +418,7 @@ index 44577e30e764..18a28617005c 100644
  
  	/*
  	 * Fork a bunch of children before we attach the scheduler so that we
-@@ -52,7 +94,10 @@ static enum scx_test_status run_test(bool global)
+@@ -52,7 +106,10 @@ static enum scx_test_status run_test(bool global)
  	for (i = 0; i < num_pre_forks; i++) {
  		pid_t pid = fork();
  
@@ -416,7 +430,7 @@ index 44577e30e764..18a28617005c 100644
  		if (pid == 0) {
  			char buf;
  
-@@ -64,26 +109,35 @@ static enum scx_test_status run_test(bool global)
+@@ -64,26 +121,35 @@ static enum scx_test_status run_test(bool global)
  		}
  	}
  	close(pipe_fds[0]);
@@ -431,8 +445,9 @@ index 44577e30e764..18a28617005c 100644
  
  	/* Signal all pre-forked children to exit. */
  	close(pipe_fds[1]);
+-	signal(SIGCHLD, SIG_DFL);
 +	pipe_fds[1] = -1;
- 	signal(SIGCHLD, SIG_DFL);
++	reap_prefork_children();
  
  	bpf_link__destroy(link);
 -	SCX_GE(skel->bss->init_task_cnt, num_pre_forks);
@@ -458,7 +473,7 @@ index 44577e30e764..18a28617005c 100644
  		if (pids[i] == 0) {
  			ret = sched_setscheduler(0, SCHED_EXT, &param);
  			SCX_BUG_ON(ret, "Failed to set sched to sched_ext");
-@@ -100,54 +154,59 @@ static enum scx_test_status run_test(bool global)
+@@ -100,54 +166,58 @@ static enum scx_test_status run_test(bool global)
  			}
  			exit(0);
  		}
@@ -537,13 +552,12 @@ index 44577e30e764..18a28617005c 100644
 +out:
 +	if (link)
 +		bpf_link__destroy(link);
-+	/* Close the pipe first so SIG_IGN can reap the woken children */
 +	if (pipe_fds[1] >= 0)
 +		close(pipe_fds[1]);
 +	if (pipe_fds[0] >= 0)
 +		close(pipe_fds[0]);
++	reap_prefork_children();
  	init_enable_count__destroy(skel);
-+	signal(SIGCHLD, SIG_DFL);
  
 -	return SCX_TEST_PASS;
 +	return status;

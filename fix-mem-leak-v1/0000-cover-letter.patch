@@ -1,7 +1,7 @@
-From 10b6d1ab7c14f0c3c1907ff8e00d664ba15fb659 Mon Sep 17 00:00:00 2001
+From d1f725a24d737e1a6d182e07c420cd723bb9308e Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Tue, 29 Sep 2026 02:38:27 +0000
-Subject: [PATCH sched_ext/for-7.4 0/7] selftests/sched_ext: Fix scheduler leaks on early return
+Subject: [PATCH sched_ext/for-7.4 0/6] selftests/sched_ext: Fix scheduler leaks on early return
 To: Tejun Heo <tj@kernel.org>
 Cc: David Vernet <void@manifault.com>,
     Andrea Righi <arighi@nvidia.com>,
@@ -24,13 +24,13 @@ to the other selftests [1]. This series does that:
 
   1: add scx_test.h helpers that keep the skeleton and the link in the
      test context, so cleanup() always tears them down
-  2: convert the tests that attach once in run() to those helpers
+  2: convert the tests that attach once in run() to those helpers, and
+     reap every child in the fork-based ones before reporting
   3: fix the tests that open the skeleton outside setup() or attach
      more than once, and route their early returns through the teardown
-  4: reap every child in select_cpu_dfl before reporting
-  5: fix the peek_dsq runner crash and its own link leak
-  6: fix the same leak in enable_cmask
-  7: make the runner fail and name a test that leaves a scheduler
+  4: fix the peek_dsq runner crash and its own link leak
+  5: fix the same leak in enable_cmask
+  6: make the runner fail and name a test that leaves a scheduler
      loaded, so a future leak points at the right test
 
 Tested with vng on for-7.4: all tests pass, with nohz_tick skipped as
@@ -42,13 +42,11 @@ about the new token-pasting macros in scx_test.h.
 
 [1] https://lore.kernel.org/r/af2aD8-tFi_yhPOV@gpd4
 
-Cheng-Yang Chou (7):
+Cheng-Yang Chou (6):
   selftests/sched_ext: Add test context helpers for skeleton and link
   selftests/sched_ext: Fix bpf_link leaks on early return from run()
   selftests/sched_ext: Fix scheduler leaks on early return in test
     helpers
-  selftests/sched_ext: Reap every child in select_cpu_dfl before
-    reporting
   selftests/sched_ext: Fix peek_dsq runner crash and link leak on
     failure
   selftests/sched_ext: Fix scheduler leak on early return in
@@ -57,24 +55,24 @@ Cheng-Yang Chou (7):
 
  .../selftests/sched_ext/ddsp_bogus_dsq_fail.c |  30 +---
  .../sched_ext/ddsp_vtimelocal_fail.c          |  30 +---
- tools/testing/selftests/sched_ext/dequeue.c   |  31 ++--
- .../selftests/sched_ext/enable_cmask.c        |  62 ++++++--
- .../sched_ext/enq_last_no_enq_fails.c         |  37 +----
+ tools/testing/selftests/sched_ext/dequeue.c   |  31 +++-
+ .../selftests/sched_ext/enable_cmask.c        |  67 ++++++--
+ .../sched_ext/enq_last_no_enq_fails.c         |  37 +---
  .../selftests/sched_ext/enq_select_cpu.c      |  35 +---
- tools/testing/selftests/sched_ext/exit.c      |  80 +++++++---
+ tools/testing/selftests/sched_ext/exit.c      |  80 ++++++---
  tools/testing/selftests/sched_ext/hotplug.c   |  69 +++++---
- .../selftests/sched_ext/init_enable_count.c   | 149 ++++++++++++------
+ .../selftests/sched_ext/init_enable_count.c   | 162 +++++++++++++-----
  tools/testing/selftests/sched_ext/numa.c      |  33 ++--
- tools/testing/selftests/sched_ext/peek_dsq.c  |  13 +-
+ tools/testing/selftests/sched_ext/peek_dsq.c  |  15 +-
  tools/testing/selftests/sched_ext/runner.c    |  39 ++++-
- tools/testing/selftests/sched_ext/scx_test.h  |  90 +++++++++++
+ tools/testing/selftests/sched_ext/scx_test.h  |  88 ++++++++++
  .../selftests/sched_ext/select_cpu_dfl.c      |  51 +-----
- .../sched_ext/select_cpu_dfl_nodispatch.c     |  44 ++----
+ .../sched_ext/select_cpu_dfl_nodispatch.c     |  44 ++---
  .../selftests/sched_ext/select_cpu_dispatch.c |  41 ++---
  .../sched_ext/select_cpu_dispatch_bad_dsq.c   |  30 +---
  .../sched_ext/select_cpu_dispatch_dbl_dsp.c   |  30 +---
  .../selftests/sched_ext/select_cpu_vtime.c    |  33 +---
- 19 files changed, 476 insertions(+), 451 deletions(-)
+ 19 files changed, 491 insertions(+), 454 deletions(-)
 
 
 base-commit: 9fa10e3bc7ec61010aa91cfca6118218e3bab773

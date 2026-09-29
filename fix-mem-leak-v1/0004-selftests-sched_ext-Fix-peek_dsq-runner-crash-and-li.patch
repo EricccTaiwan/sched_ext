@@ -1,7 +1,7 @@
-From 051d771876221eb8bb6a2a46f475aee444c35df6 Mon Sep 17 00:00:00 2001
+From 0368d5a4828503c039b87c496d67377fda0a44f0 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 05:04:25 +0000
-Subject: [PATCH sched_ext/for-7.4 5/7] selftests/sched_ext: Fix peek_dsq
+Subject: [PATCH sched_ext/for-7.4 4/6] selftests/sched_ext: Fix peek_dsq
  runner crash and link leak on failure
 
 cleanup() joins the workload threads whenever workload_running is set,
@@ -18,13 +18,22 @@ Fixes: 5aff3b319997 ("sched_ext: Add a selftest for scx_bpf_dsq_peek")
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- tools/testing/selftests/sched_ext/peek_dsq.c | 13 ++++---------
- 1 file changed, 4 insertions(+), 9 deletions(-)
+ tools/testing/selftests/sched_ext/peek_dsq.c | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/peek_dsq.c b/tools/testing/selftests/sched_ext/peek_dsq.c
-index a717384a3224..2ba0b0648238 100644
+index a717384a3224..6dd29e22da10 100644
 --- a/tools/testing/selftests/sched_ext/peek_dsq.c
 +++ b/tools/testing/selftests/sched_ext/peek_dsq.c
+@@ -17,7 +17,7 @@
+ 
+ #define NUM_WORKERS 4
+ 
+-static bool workload_running = true;
++static bool workload_running;
+ static pthread_t workload_threads[NUM_WORKERS];
+ 
+ /**
 @@ -79,6 +79,7 @@ static enum scx_test_status run(void *ctx)
  	struct peek_dsq *skel = ctx;
  	bool failed = false;

@@ -1,7 +1,7 @@
-From 14f008ff931534049d553b35a6d7ee9d1b5cd750 Mon Sep 17 00:00:00 2001
+From afc0cc13c99209e6da1b6d4ba245cc4934e69a81 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
-Subject: [PATCH sched_ext/for-7.4 2/7] selftests/sched_ext: Fix bpf_link leaks
+Subject: [PATCH sched_ext/for-7.4 2/6] selftests/sched_ext: Fix bpf_link leaks
  on early return from run()
 
 Ten tests destroy the link at the end of run(), after checks that can
@@ -9,8 +9,9 @@ return early. Convert them to the context helpers so that cleanup()
 always destroys it. Also convert select_cpu_dfl, which open-codes the
 same context.
 
-select_cpu_dispatch and select_cpu_dfl_nodispatch also reap all their
-children before reporting, so a failed check no longer leaves zombies.
+select_cpu_dfl, select_cpu_dispatch and select_cpu_dfl_nodispatch also
+reap all their children before reporting, so a failed check no longer
+leaves zombies.
 
 Fixes: a5db7817af78 ("sched_ext: Add selftests")
 Fixes: 36adf6fe6cbe ("selftests/sched_ext: Update test enq_select_cpu_fails")
@@ -19,18 +20,18 @@ Fixes: c31f2ee5cd7d ("sched_ext: Fix enq_last_no_enq_fails selftest")
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- .../selftests/sched_ext/ddsp_bogus_dsq_fail.c | 30 ++-----------
- .../sched_ext/ddsp_vtimelocal_fail.c          | 30 ++-----------
- .../sched_ext/enq_last_no_enq_fails.c         | 37 ++--------------
- .../selftests/sched_ext/enq_select_cpu.c      | 35 +++------------
- tools/testing/selftests/sched_ext/numa.c      | 33 +++++---------
- .../selftests/sched_ext/select_cpu_dfl.c      | 43 +-----------------
- .../sched_ext/select_cpu_dfl_nodispatch.c     | 44 ++++++-------------
- .../selftests/sched_ext/select_cpu_dispatch.c | 41 ++++++-----------
- .../sched_ext/select_cpu_dispatch_bad_dsq.c   | 30 ++-----------
- .../sched_ext/select_cpu_dispatch_dbl_dsp.c   | 30 ++-----------
- .../selftests/sched_ext/select_cpu_vtime.c    | 33 +++-----------
- 11 files changed, 71 insertions(+), 315 deletions(-)
+ .../selftests/sched_ext/ddsp_bogus_dsq_fail.c | 30 ++---------
+ .../sched_ext/ddsp_vtimelocal_fail.c          | 30 ++---------
+ .../sched_ext/enq_last_no_enq_fails.c         | 37 ++------------
+ .../selftests/sched_ext/enq_select_cpu.c      | 35 ++-----------
+ tools/testing/selftests/sched_ext/numa.c      | 33 +++++-------
+ .../selftests/sched_ext/select_cpu_dfl.c      | 51 +++----------------
+ .../sched_ext/select_cpu_dfl_nodispatch.c     | 44 +++++-----------
+ .../selftests/sched_ext/select_cpu_dispatch.c | 41 +++++----------
+ .../sched_ext/select_cpu_dispatch_bad_dsq.c   | 30 ++---------
+ .../sched_ext/select_cpu_dispatch_dbl_dsp.c   | 30 ++---------
+ .../selftests/sched_ext/select_cpu_vtime.c    | 33 ++----------
+ 11 files changed, 76 insertions(+), 318 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c b/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c
 index b6d13496b24e..d1bec68046c4 100644
@@ -319,10 +320,10 @@ index b060c3b65c82..0ce462ffa1f1 100644
  	.name = "numa",
  	.description = "Verify NUMA-aware functionalities",
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dfl.c b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
-index 7e342c0cec65..5b5006d4ee62 100644
+index 7e342c0cec65..6565c62bbcbc 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dfl.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
-@@ -14,35 +14,7 @@
+@@ -14,44 +14,15 @@
  
  #define NUM_CHILDREN 1028
  
@@ -359,9 +360,10 @@ index 7e342c0cec65..5b5006d4ee62 100644
  
  static enum scx_test_status run(void *ctx)
  {
-@@ -50,8 +22,7 @@ static enum scx_test_status run(void *ctx)
+ 	struct select_cpu_dfl_ctx *tctx = ctx;
  	pid_t pids[NUM_CHILDREN];
- 	int i, status, nforked = 0;
+-	int i, status, nforked = 0;
++	int i, status, nforked = 0, nfailed = 0;
  
 -	tctx->link = bpf_map__attach_struct_ops(tctx->skel->maps.select_cpu_dfl_ops);
 -	SCX_FAIL_IF(!tctx->link, "Failed to attach scheduler");
@@ -369,7 +371,24 @@ index 7e342c0cec65..5b5006d4ee62 100644
  
  	for (i = 0; i < NUM_CHILDREN; i++) {
  		pids[i] = fork();
-@@ -76,16 +47,6 @@ static enum scx_test_status run(void *ctx)
+@@ -63,29 +34,21 @@ static enum scx_test_status run(void *ctx)
+ 			nforked++;
+ 	}
+ 
++	/* Reap every child before reporting */
+ 	for (i = 0; i < NUM_CHILDREN; i++) {
+ 		if (pids[i] <= 0)
+ 			continue;
+-		SCX_EQ(waitpid(pids[i], &status, 0), pids[i]);
+-		SCX_EQ(status, 0);
++		if (waitpid(pids[i], &status, 0) != pids[i] || status)
++			nfailed++;
+ 	}
+ 
+ 	SCX_GT(nforked, 0);
++	SCX_EQ(nfailed, 0);
+ 	SCX_ASSERT(!tctx->skel->bss->saw_local);
+ 
  	return SCX_TEST_PASS;
  }
  

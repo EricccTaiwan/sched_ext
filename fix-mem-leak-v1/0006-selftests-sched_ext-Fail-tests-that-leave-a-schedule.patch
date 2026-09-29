@@ -1,7 +1,7 @@
-From 10b6d1ab7c14f0c3c1907ff8e00d664ba15fb659 Mon Sep 17 00:00:00 2001
+From d1f725a24d737e1a6d182e07c420cd723bb9308e Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Sat, 26 Sep 2026 20:04:47 +0000
-Subject: [PATCH sched_ext/for-7.4 7/7] selftests/sched_ext: Fail tests that
+Subject: [PATCH sched_ext/for-7.4 6/6] selftests/sched_ext: Fail tests that
  leave a scheduler loaded
 
 A test that leaves its BPF scheduler loaded does not fail itself. The

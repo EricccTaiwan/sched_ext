@@ -1,7 +1,7 @@
-From cafbe01418d415effb49c4f2e84a8dd34bf0af5f Mon Sep 17 00:00:00 2001
+From 0bb7ea49b4e1fa4f4feaf071f6947ca70d427f64 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
-Subject: [PATCH sched_ext/for-7.4 1/7] selftests/sched_ext: Add test context
+Subject: [PATCH sched_ext/for-7.4 1/6] selftests/sched_ext: Add test context
  helpers for skeleton and link
 
 SCX_*() assertions return from run(), so a bpf_link__destroy() at the
@@ -16,11 +16,11 @@ next patch converts the affected tests.
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- tools/testing/selftests/sched_ext/scx_test.h | 90 ++++++++++++++++++++
- 1 file changed, 90 insertions(+)
+ tools/testing/selftests/sched_ext/scx_test.h | 88 ++++++++++++++++++++
+ 1 file changed, 88 insertions(+)
 
 diff --git a/tools/testing/selftests/sched_ext/scx_test.h b/tools/testing/selftests/sched_ext/scx_test.h
-index 90b8d6915bb7..cc60ae4ac448 100644
+index 90b8d6915bb7..f65571228773 100644
 --- a/tools/testing/selftests/sched_ext/scx_test.h
 +++ b/tools/testing/selftests/sched_ext/scx_test.h
 @@ -9,6 +9,7 @@
@@ -31,7 +31,7 @@ index 90b8d6915bb7..cc60ae4ac448 100644
  #include <scx/common.h>
  #include <scx/compat.h>
  
-@@ -128,4 +129,93 @@ void scx_test_register(struct scx_test *test);
+@@ -128,4 +129,91 @@ void scx_test_register(struct scx_test *test);
  	__val;									\
  })
  
@@ -102,8 +102,6 @@ index 90b8d6915bb7..cc60ae4ac448 100644
 +{									\
 +	struct __name##_ctx *tctx = ctx;				\
 +									\
-+	if (!tctx)							\
-+		return;							\
 +	if (tctx->link)							\
 +		bpf_link__destroy(tctx->link);				\
 +	__name##__destroy(tctx->skel);					\

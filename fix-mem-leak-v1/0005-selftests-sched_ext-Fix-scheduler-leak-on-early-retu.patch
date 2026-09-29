@@ -1,7 +1,7 @@
-From ca4b986ea3b6b8da1b2a24c0b22f29735894cbab Mon Sep 17 00:00:00 2001
+From 5ae78accca6ee3f616897e90ac65a7e8ea002161 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:35 +0000
-Subject: [PATCH sched_ext/for-7.4 6/7] selftests/sched_ext: Fix scheduler leak
+Subject: [PATCH sched_ext/for-7.4 5/6] selftests/sched_ext: Fix scheduler leak
  on early return in enable_cmask
 
 enable_cmask opens its skeleton in run(), and its SCX_*() checks return
@@ -15,11 +15,11 @@ Fixes: d781d1b78acf ("selftests/sched_ext: Check the cmask cid-form ops.enable()
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
- .../selftests/sched_ext/enable_cmask.c        | 62 ++++++++++++++-----
- 1 file changed, 46 insertions(+), 16 deletions(-)
+ .../selftests/sched_ext/enable_cmask.c        | 67 ++++++++++++++-----
+ 1 file changed, 50 insertions(+), 17 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/enable_cmask.c b/tools/testing/selftests/sched_ext/enable_cmask.c
-index 556bcad4431d..845341fd2f0f 100644
+index 556bcad4431d..ff3bb5f3ba64 100644
 --- a/tools/testing/selftests/sched_ext/enable_cmask.c
 +++ b/tools/testing/selftests/sched_ext/enable_cmask.c
 @@ -70,13 +70,27 @@ static int child(int idx)
@@ -53,7 +53,7 @@ index 556bcad4431d..845341fd2f0f 100644
  
  	if (!__COMPAT_struct_has_field("scx_enable_args", "cmask_arena_addr"))
  		return SCX_TEST_SKIP;
-@@ -91,43 +105,59 @@ static enum scx_test_status run(void *ctx)
+@@ -91,43 +105,62 @@ static enum scx_test_status run(void *ctx)
  	skel = enable_cmask__open();
  	SCX_FAIL_IF(!skel, "Failed to open");
  	SCX_ENUM_INIT(skel);
@@ -79,9 +79,13 @@ index 556bcad4431d..845341fd2f0f 100644
 +			nforked++;
  	}
  
- 	/* affinity changes from the outside race with the children's own */
+-	/* affinity changes from the outside race with the children's own */
 -	for (i = 0; i < NR_CHILDREN; i++)
 -		pin(pids[i], i + NR_CHILDREN);
++	/*
++	 * Affinity changes from the outside race with the children's own. A
++	 * child may already have exited by now, so a failure here is expected.
++	 */
 +	for (i = 0; i < NR_CHILDREN; i++) {
 +		if (pids[i] > 0)
 +			pin(pids[i], i + NR_CHILDREN);
