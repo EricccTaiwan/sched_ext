@@ -1,0 +1,190 @@
+From 8feb6782f1a8db2f169d0d8eb9b27f7a7f6a2dd2 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Fri, 23 Oct 2026 17:48:09 +0000
+Subject: [PATCH sched_ext/for-7.5 2/2] selftests/sched_ext: Check that the
+ scheduler gets enabled in four tests
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+Four tests attach a scheduler and pass without anything showing that it
+was enabled:
+
+  - minimal only checks that the attach succeeds. With cache detection
+    failing for a CPU, scx_root_enable() fails with -22 and minimal
+    still reports ok.
+  - select_cpu_dfl asserts that ops.enqueue() never saw a task
+    dispatched to SCX_DSQ_LOCAL, which also holds when the scheduler
+    never ran or died early.
+  - select_cpu_dispatch only checks that its children exit cleanly,
+    which they do whether or not the scheduler ran.
+  - total_bw first checks that loading the scheduler leaves total_bw
+    unchanged, which is also what a failed enable does.
+
+Check that the scheduler is enabled after attaching in all four, and
+again before the final assertions of the two select_cpu tests. Convert
+minimal to the test context helpers so the new check cannot leak the
+link, and have total_bw destroy its link before failing.
+
+reload_loop is left alone: it attaches and detaches from two threads,
+so the state it would read is not stable, and maximal already checks
+the same scheduler with SCX_ASSERT_ALIVE().
+
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/minimal.c   | 33 +++----------------
+ .../selftests/sched_ext/select_cpu_dfl.c      |  3 ++
+ .../selftests/sched_ext/select_cpu_dispatch.c |  3 ++
+ tools/testing/selftests/sched_ext/total_bw.c  | 21 ++++++++++++
+ 4 files changed, 31 insertions(+), 29 deletions(-)
+
+diff --git a/tools/testing/selftests/sched_ext/minimal.c b/tools/testing/selftests/sched_ext/minimal.c
+index 89f7261757ff..e416e58ffbb6 100644
+--- a/tools/testing/selftests/sched_ext/minimal.c
++++ b/tools/testing/selftests/sched_ext/minimal.c
+@@ -11,43 +11,18 @@
+ #include "minimal.bpf.skel.h"
+ #include "scx_test.h"
+ 
+-static enum scx_test_status setup(void **ctx)
+-{
+-	struct minimal *skel;
+-
+-	skel = minimal__open();
+-	SCX_FAIL_IF(!skel, "Failed to open");
+-	SCX_ENUM_INIT(skel);
+-	SCX_FAIL_IF(minimal__load(skel), "Failed to load skel");
+-
+-	*ctx = skel;
+-
+-	return SCX_TEST_PASS;
+-}
++SCX_TEST_DEFINE_CTX(minimal);
+ 
+ static enum scx_test_status run(void *ctx)
+ {
+-	struct minimal *skel = ctx;
+-	struct bpf_link *link;
++	struct minimal_ctx *tctx = ctx;
+ 
+-	link = bpf_map__attach_struct_ops(skel->maps.minimal_ops);
+-	if (!link) {
+-		SCX_ERR("Failed to attach scheduler");
+-		return SCX_TEST_FAIL;
+-	}
+-
+-	bpf_link__destroy(link);
++	SCX_TEST_ATTACH(tctx, minimal_ops);
++	SCX_ASSERT_ENABLED();
+ 
+ 	return SCX_TEST_PASS;
+ }
+ 
+-static void cleanup(void *ctx)
+-{
+-	struct minimal *skel = ctx;
+-
+-	minimal__destroy(skel);
+-}
+-
+ struct scx_test minimal = {
+ 	.name = "minimal",
+ 	.description = "Verify we can load a fully minimal scheduler",
+diff --git a/tools/testing/selftests/sched_ext/select_cpu_dfl.c b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
+index 6565c62bbcbc..18e619f7f781 100644
+--- a/tools/testing/selftests/sched_ext/select_cpu_dfl.c
++++ b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
+@@ -23,6 +23,7 @@ static enum scx_test_status run(void *ctx)
+ 	int i, status, nforked = 0, nfailed = 0;
+ 
+ 	SCX_TEST_ATTACH(tctx, select_cpu_dfl_ops);
++	SCX_ASSERT_ENABLED();
+ 
+ 	for (i = 0; i < NUM_CHILDREN; i++) {
+ 		pids[i] = fork();
+@@ -44,6 +45,8 @@ static enum scx_test_status run(void *ctx)
+ 
+ 	SCX_GT(nforked, 0);
+ 	SCX_EQ(nfailed, 0);
++	/* A scheduler that died early would also leave saw_local unset */
++	SCX_ASSERT_ENABLED();
+ 	SCX_ASSERT(!tctx->skel->bss->saw_local);
+ 
+ 	return SCX_TEST_PASS;
+diff --git a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
+index 16770f482fd8..1e8477e61797 100644
+--- a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
++++ b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
+@@ -22,6 +22,7 @@ static enum scx_test_status run(void *ctx)
+ 	int i, status, nforked = 0, nfailed = 0;
+ 
+ 	SCX_TEST_ATTACH(tctx, select_cpu_dispatch_ops);
++	SCX_ASSERT_ENABLED();
+ 
+ 	for (i = 0; i < NUM_CHILDREN; i++) {
+ 		pids[i] = fork();
+@@ -43,6 +44,8 @@ static enum scx_test_status run(void *ctx)
+ 
+ 	SCX_EQ(nforked, NUM_CHILDREN);
+ 	SCX_EQ(nfailed, 0);
++	/* The children exit cleanly whether or not the scheduler ran */
++	SCX_ASSERT_ENABLED();
+ 
+ 	return SCX_TEST_PASS;
+ }
+diff --git a/tools/testing/selftests/sched_ext/total_bw.c b/tools/testing/selftests/sched_ext/total_bw.c
+index 2af01cee90cc..f7a0f5d692e1 100644
+--- a/tools/testing/selftests/sched_ext/total_bw.c
++++ b/tools/testing/selftests/sched_ext/total_bw.c
+@@ -253,6 +253,18 @@ static int fetch_verify_total_bw(long *bw_values, int nr_cpus)
+ 	return -1;
+ }
+ 
++/* Unchanged total_bw can't tell a failed enable from a correct one */
++static bool sched_enabled(void)
++{
++	char buf[16];
++	const char *state = scx_sched_state(buf, sizeof(buf));
++
++	if (state && !strcmp(state, "enabled"))
++		return true;
++	SCX_ERR("Scheduler is not enabled (state: %s)", state ?: "unavailable");
++	return false;
++}
++
+ static enum scx_test_status setup(void **ctx)
+ {
+ 	struct total_bw_ctx *test_ctx;
+@@ -320,6 +332,10 @@ static enum scx_test_status run(void *ctx)
+ 		SCX_ERR("Failed to attach scheduler");
+ 		return SCX_TEST_FAIL;
+ 	}
++	if (!sched_enabled()) {
++		bpf_link__destroy(link);
++		return SCX_TEST_FAIL;
++	}
+ 
+ 	fprintf(stderr, "BPF program loaded, reading total_bw values\n");
+ 	if (fetch_verify_total_bw(loaded_bw, test_ctx->nr_cpus) < 0) {
+@@ -405,6 +421,11 @@ static enum scx_test_status run(void *ctx)
+ 		ret = SCX_TEST_FAIL;
+ 		goto restore;
+ 	}
++	if (!sched_enabled()) {
++		bpf_link__destroy(link);
++		ret = SCX_TEST_FAIL;
++		goto restore;
++	}
+ 
+ 	if (fetch_verify_total_bw(loaded_bw, test_ctx->nr_cpus) < 0) {
+ 		SCX_ERR("Failed to get stable values with BPF loaded (detach test)");
+-- 
+2.56.0
+

@@ -1,0 +1,64 @@
+From 8feb6782f1a8db2f169d0d8eb9b27f7a7f6a2dd2 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Fri, 23 Oct 2026 18:12:10 +0000
+Subject: [PATCH sched_ext/for-7.5 0/2] selftests/sched_ext: Catch schedulers that fail to enable
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+When a root scheduler fails late in scx_root_enable_workfn(), the
+kernel records the error for ops.exit() and still completes the attach
+successfully. A test that only checks the attach therefore passes even
+though the scheduler never ran. With cache detection failing for CPU 0,
+scx_root_enable() fails with -22 for every scheduler, yet minimal and
+select_cpu_dfl report ok. select_cpu_dispatch and total_bw only check
+results that a scheduler which never ran also produces.
+
+  1: add SCX_ASSERT_ENABLED(), which checks /sys/kernel/sched_ext/state,
+     and share the state read with the runner's leftover-scheduler check
+  2: use it in those four tests
+
+This series is on top of "selftests/sched_ext: Fix scheduler leaks on
+early return", which adds the test context helpers and the runner check
+it uses.
+
+Tested with vng on for-7.5 plus that series: all tests pass, with
+enq_blocked and nohz_tick skipped as they need CONFIG_SCHED_PROXY_EXEC
+and nohz_full=. With cache detection forced to fail for CPU 0, the four
+tests now fail with "Scheduler is not enabled (state: disabled)".
+
+checkpatch --strict is clean on both patches.
+
+Cheng-Yang Chou (2):
+  selftests/sched_ext: Add SCX_ASSERT_ENABLED() to catch failed enables
+  selftests/sched_ext: Check that the scheduler gets enabled in four
+    tests
+
+ tools/testing/selftests/sched_ext/minimal.c   | 33 +++----------------
+ tools/testing/selftests/sched_ext/runner.c    | 13 ++------
+ tools/testing/selftests/sched_ext/scx_test.h  | 20 +++++++++++
+ .../selftests/sched_ext/select_cpu_dfl.c      |  3 ++
+ .../selftests/sched_ext/select_cpu_dispatch.c |  3 ++
+ tools/testing/selftests/sched_ext/total_bw.c  | 21 ++++++++++++
+ tools/testing/selftests/sched_ext/util.c      |  9 +++++
+ tools/testing/selftests/sched_ext/util.h      |  2 ++
+ 8 files changed, 65 insertions(+), 39 deletions(-)
+
+
+base-commit: bbd3a328803509e8639fb7bb87b9e29a68422712
+prerequisite-patch-id: f916191c98af8f132032e5ce2754379ee221aa3a
+prerequisite-patch-id: cd77ec7f1351564bdbe8daa93175e60bfedef5e3
+prerequisite-patch-id: 9cfcfaa70c635ea287a6f4abb14c03974384f02b
+prerequisite-patch-id: acc8541f28b2d5dfe656b2ce627eb233d46ed9b4
+prerequisite-patch-id: e17bf7e5b3bafe718f0f2ecf4929d0611b761f1d
+prerequisite-patch-id: ba9251e8902b2820b754892e2444b32ce7ce6f2a
+prerequisite-patch-id: 00a64c3ca8c15349ffeefba2281cf15206755db0
+-- 
+2.56.0
+

@@ -1,0 +1,137 @@
+From 1dfa847e87ecddb673a1854f156c9b6c7716f1d2 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Fri, 23 Oct 2026 17:48:09 +0000
+Subject: [PATCH sched_ext/for-7.5 1/2] selftests/sched_ext: Add
+ SCX_ASSERT_ENABLED() to catch failed enables
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+When scx_root_enable_workfn() fails after ops validation, it records
+the error with scx_error() and still completes the attach successfully,
+so that ops.exit() receives the full error information. A test that
+only checks that bpf_map__attach_struct_ops() returned a link therefore
+passes even though the scheduler never ran.
+
+Add SCX_ASSERT_ENABLED(), which fails the test unless
+/sys/kernel/sched_ext/state reads "enabled". The attach waits for the
+enable work to finish, and a failed enable flushes the disable before
+returning, so the state is final right after the attach. Tests whose
+BPF side has no uei can also use it to check that their scheduler is
+still alive.
+
+Move the state read into scx_sched_state() in util.c so that the runner's
+check for a leftover scheduler shares it.
+
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/runner.c   | 13 +++----------
+ tools/testing/selftests/sched_ext/scx_test.h | 20 ++++++++++++++++++++
+ tools/testing/selftests/sched_ext/util.c     |  9 +++++++++
+ tools/testing/selftests/sched_ext/util.h     |  2 ++
+ 4 files changed, 34 insertions(+), 10 deletions(-)
+
+diff --git a/tools/testing/selftests/sched_ext/runner.c b/tools/testing/selftests/sched_ext/runner.c
+index 9b90ac0fc7b3..92f4e1d51a64 100644
+--- a/tools/testing/selftests/sched_ext/runner.c
++++ b/tools/testing/selftests/sched_ext/runner.c
+@@ -88,17 +88,10 @@ static bool should_skip_test(const struct scx_test *test, const char * filter)
+ /* Whether a BPF scheduler is loaded, false if sched_ext is unavailable */
+ static bool scx_sched_loaded(void)
+ {
+-	char buf[16] = "";
+-	FILE *f;
++	char buf[16];
++	const char *state = scx_sched_state(buf, sizeof(buf));
+ 
+-	f = fopen("/sys/kernel/sched_ext/state", "r");
+-	if (!f)
+-		return false;
+-	if (!fgets(buf, sizeof(buf), f))
+-		buf[0] = '\0';
+-	fclose(f);
+-
+-	return buf[0] && strcmp(buf, "disabled\n");
++	return state && strcmp(state, "disabled");
+ }
+ 
+ static enum scx_test_status run_test(const struct scx_test *test)
+diff --git a/tools/testing/selftests/sched_ext/scx_test.h b/tools/testing/selftests/sched_ext/scx_test.h
+index 9bb364b391f1..d678fa322832 100644
+--- a/tools/testing/selftests/sched_ext/scx_test.h
++++ b/tools/testing/selftests/sched_ext/scx_test.h
+@@ -10,8 +10,10 @@
+ 
+ #include <errno.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <scx/common.h>
+ #include <scx/compat.h>
++#include "util.h"
+ 
+ enum scx_test_status {
+ 	SCX_TEST_PASS = 0,
+@@ -127,6 +129,24 @@ void scx_test_register(struct scx_test *test);
+ 				 (__skel)->data->__uei.msg);			\
+ 	} while (0)
+ 
++/*
++ * SCX_ASSERT_ENABLED - Fail the test unless the scheduler under test is
++ * enabled. A root scheduler that fails late in enabling still attaches
++ * successfully and reports the error through ops.exit(), so a successful
++ * attach alone doesn't prove the scheduler ran. Attach waits for the
++ * enable to finish, so the state is final right after it. Also catches a
++ * scheduler that died after enabling, for tests without a uei.
++ */
++#define SCX_ASSERT_ENABLED()							\
++	do {									\
++		char __buf[16];							\
++		const char *__state = scx_sched_state(__buf, sizeof(__buf));	\
++										\
++		if (!__state || strcmp(__state, "enabled"))			\
++			SCX_FAIL("Scheduler is not enabled (state: %s)",	\
++				 __state ?: "unavailable");			\
++	} while (0)
++
+ /*
+  * SCX_TIMED_WAIT_UEI - Wait for the scheduler under test to exit, i.e.
+  * its uei to be filled in, for up to @__ms iterations at ~1ms each.
+diff --git a/tools/testing/selftests/sched_ext/util.c b/tools/testing/selftests/sched_ext/util.c
+index c93fc5df552d..8c18555f92f8 100644
+--- a/tools/testing/selftests/sched_ext/util.c
++++ b/tools/testing/selftests/sched_ext/util.c
+@@ -212,3 +212,12 @@ int scx_test_preempt_lazy_mode(void)
+ 
+ 	return config_preempt_lazy_mode();
+ }
++
++const char *scx_sched_state(char *buf, size_t len)
++{
++	if (read_text("/sys/kernel/sched_ext/state", buf, len) <= 0)
++		return NULL;
++	buf[strcspn(buf, "\n")] = '\0';
++
++	return buf;
++}
+diff --git a/tools/testing/selftests/sched_ext/util.h b/tools/testing/selftests/sched_ext/util.h
+index aac34fc4ef71..133a3d953b3f 100644
+--- a/tools/testing/selftests/sched_ext/util.h
++++ b/tools/testing/selftests/sched_ext/util.h
+@@ -21,5 +21,7 @@ struct scx_test_gated_worker scx_test_spawn_gated_worker(int cpu, bool set_sched
+ bool scx_test_start_gated_worker(struct scx_test_gated_worker *worker);
+ void scx_test_stop_gated_worker(struct scx_test_gated_worker *worker);
+ int scx_test_preempt_lazy_mode(void);
++/* Read /sys/kernel/sched_ext/state into @buf, NULL if it can't be read */
++const char *scx_sched_state(char *buf, size_t len);
+ 
+ #endif // __SCX_TEST_UTIL_H__
+-- 
+2.56.0
+
