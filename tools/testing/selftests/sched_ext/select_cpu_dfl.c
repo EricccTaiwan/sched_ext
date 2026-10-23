@@ -23,6 +23,7 @@ static enum scx_test_status run(void *ctx)
 	int i, status, nforked = 0, nfailed = 0;
 
 	SCX_TEST_ATTACH(tctx, select_cpu_dfl_ops);
+	SCX_ASSERT_ENABLED();
 
 	for (i = 0; i < NUM_CHILDREN; i++) {
 		pids[i] = fork();
@@ -44,6 +45,8 @@ static enum scx_test_status run(void *ctx)
 
 	SCX_GT(nforked, 0);
 	SCX_EQ(nfailed, 0);
+	/* A scheduler that died early would also leave saw_local unset */
+	SCX_ASSERT_ENABLED();
 	SCX_ASSERT(!tctx->skel->bss->saw_local);
 
 	return SCX_TEST_PASS;

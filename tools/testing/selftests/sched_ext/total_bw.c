@@ -320,6 +320,11 @@ static enum scx_test_status run(void *ctx)
 		SCX_ERR("Failed to attach scheduler");
 		return SCX_TEST_FAIL;
 	}
+	/* Unchanged total_bw can't tell a failed enable from a correct one */
+	if (!SCX_CHECK_ENABLED()) {
+		bpf_link__destroy(link);
+		return SCX_TEST_FAIL;
+	}
 
 	fprintf(stderr, "BPF program loaded, reading total_bw values\n");
 	if (fetch_verify_total_bw(loaded_bw, test_ctx->nr_cpus) < 0) {
@@ -402,6 +407,11 @@ static enum scx_test_status run(void *ctx)
 	link = bpf_map__attach_struct_ops(test_ctx->skel->maps.minimal_ops);
 	if (!link) {
 		SCX_ERR("Failed to attach scheduler for detach test");
+		ret = SCX_TEST_FAIL;
+		goto restore;
+	}
+	if (!SCX_CHECK_ENABLED()) {
+		bpf_link__destroy(link);
 		ret = SCX_TEST_FAIL;
 		goto restore;
 	}

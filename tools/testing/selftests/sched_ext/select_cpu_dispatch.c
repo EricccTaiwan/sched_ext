@@ -22,6 +22,7 @@ static enum scx_test_status run(void *ctx)
 	int i, status, nforked = 0, nfailed = 0;
 
 	SCX_TEST_ATTACH(tctx, select_cpu_dispatch_ops);
+	SCX_ASSERT_ENABLED();
 
 	for (i = 0; i < NUM_CHILDREN; i++) {
 		pids[i] = fork();
@@ -43,6 +44,8 @@ static enum scx_test_status run(void *ctx)
 
 	SCX_EQ(nforked, NUM_CHILDREN);
 	SCX_EQ(nfailed, 0);
+	/* The children exit cleanly whether or not the scheduler ran */
+	SCX_ASSERT_ENABLED();
 
 	return SCX_TEST_PASS;
 }
