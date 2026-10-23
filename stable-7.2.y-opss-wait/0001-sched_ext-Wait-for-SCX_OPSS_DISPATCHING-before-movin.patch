@@ -1,0 +1,84 @@
+From 8b37ce64275cd265e851e12b6450c39e9948d7ce Mon Sep 17 00:00:00 2001
+In-Reply-To: <2026102109-rejoice-reboot-d810@gregkh>
+References: <2026102109-rejoice-reboot-d810@gregkh>
+From: Kuba Piecuch <jpiecuch@google.com>
+Date: Mon, 12 Oct 2026 21:07:46 +0000
+Subject: [PATCH 7.2.y] sched_ext: Wait for SCX_OPSS_DISPATCHING before moving
+ tasks off DSQs
+To: stable@vger.kernel.org
+Cc: Kuba Piecuch <jpiecuch@google.com>,
+    Tejun Heo <tj@kernel.org>,
+    Andrea Righi <arighi@nvidia.com>
+
+[ Upstream commit 2935062be77113c1c4565ca9d0c72180449aafee ]
+
+A task can be found on a non-local DSQ while the CPU which dispatched it
+is still running ops.dequeue() and hasn't cleared SCX_OPSS_DISPATCHING.
+The DSQ consume and move paths don't wait for the dispatch to finish and
+can operate on the task concurrently with the dispatcher.
+
+Call scx_wait_dispatching() in scx_move_local_task_to_local_dsq(),
+unlink_dsq_and_switch_rq_lock() and move_task_between_dsqs() before they
+operate on the task. In scx_move_local_task_to_local_dsq(), wait before
+scx_resolve_local_dsq() as it may update p->scx.flags.
+
+Fixes: ebf1ccff79c4 ("sched_ext: Fix ops.dequeue() semantics")
+Fixes: cb86607ada73 ("sched_ext: Don't run ops.dequeue() with a DSQ lock held")
+Cc: stable@vger.kernel.org # v7.1+
+Reviewed-by: Andrea Righi <arighi@nvidia.com>
+Assisted-by: Claude:claude-opus-5.5
+Signed-off-by: Kuba Piecuch <jpiecuch@google.com>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+[ Inlined scx_wait_dispatching(), which 7.2.y doesn't have, into
+  move_local_task_to_local_dsq(), unlink_dsq_and_lock_src_rq() and
+  move_task_between_dsqs(), as was done for the reenqueue paths in
+  7.2.y. 7.2.y has no scx_resolve_local_dsq(), so
+  move_local_task_to_local_dsq() waits before linking the task. ]
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ kernel/sched/ext/ext.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/ext/ext.c b/kernel/sched/ext/ext.c
+index 8d4992e7e012..8d595c6c9c20 100644
+--- a/kernel/sched/ext/ext.c
++++ b/kernel/sched/ext/ext.c
+@@ -2288,6 +2288,8 @@ static void move_local_task_to_local_dsq(struct scx_sched *sch,
+ 	lockdep_assert_rq_held(dst_rq);
+ 
+ 	WARN_ON_ONCE(p->scx.holding_cpu >= 0);
++	if (unlikely(atomic_long_read_acquire(&p->scx.ops_state) == SCX_OPSS_DISPATCHING))
++		wait_ops_state(p, SCX_OPSS_DISPATCHING);
+ 
+ 	if (enq_flags & (SCX_ENQ_HEAD | SCX_ENQ_PREEMPT))
+ 		list_add(&p->scx.dsq_list.node, &dst_dsq->list);
+@@ -2458,8 +2460,13 @@ static bool unlink_dsq_and_lock_src_rq(struct task_struct *p,
+ 	raw_spin_rq_lock(src_rq);
+ 
+ 	/* task_rq couldn't have changed if we're still the holding cpu */
+-	return likely(p->scx.holding_cpu == cpu) &&
+-		!WARN_ON_ONCE(src_rq != task_rq(p));
++	if (likely(p->scx.holding_cpu == cpu) && !WARN_ON_ONCE(src_rq != task_rq(p))) {
++		if (unlikely(atomic_long_read_acquire(&p->scx.ops_state) == SCX_OPSS_DISPATCHING))
++			wait_ops_state(p, SCX_OPSS_DISPATCHING);
++		return true;
++	}
++
++	return false;
+ }
+ 
+ static bool consume_remote_task(struct rq *this_rq,
+@@ -2507,6 +2514,9 @@ static struct rq *move_task_between_dsqs(struct scx_sched *sch,
+ 	lockdep_assert_held(&src_dsq->lock);
+ 	lockdep_assert_rq_held(src_rq);
+ 
++	if (unlikely(atomic_long_read_acquire(&p->scx.ops_state) == SCX_OPSS_DISPATCHING))
++		wait_ops_state(p, SCX_OPSS_DISPATCHING);
++
+ 	if (dst_dsq->id == SCX_DSQ_LOCAL) {
+ 		dst_rq = container_of(dst_dsq, struct rq, scx.local_dsq);
+ 		if (src_rq != dst_rq &&
+-- 
+2.56.0
+
