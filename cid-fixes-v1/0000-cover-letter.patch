@@ -1,7 +1,7 @@
-From dea1437d537e1a9e2c1126b48e37bedb45fa6a9b Mon Sep 17 00:00:00 2001
+From 698148e95d70fad2b10ddc5ee449e0e568ed4a48 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
-Date: Tue, 29 Sep 2026 02:38:27 +0000
-Subject: [PATCH sched_ext/for-7.3-fixes 0/2] sched_ext: Fix two cid bugs that can crash the kernel or block loading
+Date: Fri, 23 Oct 2026 15:29:46 +0000
+Subject: [PATCH sched_ext/for-7.4-fixes 0/2] sched_ext: Fix two cid bugs that can crash the kernel or block loading
 To: Tejun Heo <tj@kernel.org>
 Cc: David Vernet <void@manifault.com>,
     Andrea Righi <arighi@nvidia.com>,
@@ -28,16 +28,16 @@ Neither depends on the other.
      only when cacheinfo is populated and contains the CPU, and fall
      back to the node mask otherwise.
 
-Tested with vng on for-7.3-fixes. Without the patches, a BPF scheduler
+Tested with vng on for-7.4-fixes. Without the patches, a BPF scheduler
 that frees the set_cpumask scratch pages or the online cmask pages
 panics the kernel from scx_call_op_set_cpumask() and handle_hotplug()
 respectively, and forcing a cacheinfo failure on CPU 0 makes
 scx_root_enable() fail with -22. With the patches, the first two only
-abort the scheduler and the next one loads normally, and the third
-loads using the node mask. The full selftests pass (nohz_tick skipped),
-and scx_qmap with a sub-scheduler, affinity changes and CPU hotplug
-runs without a BUG or WARN. The failure path in the sub-scheduler caps
-update was checked by reading only.
+abort the scheduler and the next one loads normally, and the third loads
+using the node mask. The full selftests pass (enq_blocked and nohz_tick
+skipped), and scx_qmap with a sub-scheduler, affinity changes and CPU
+hotplug runs without a BUG or WARN. The failure path in the
+sub-scheduler caps update was checked by reading only.
 
 The cacheinfo failure does not happen on x86 by itself; it was injected.
 The realistic case is a DT or ACPI cacheinfo failure on arm64 or riscv.
@@ -56,7 +56,7 @@ Cheng-Yang Chou (2):
  5 files changed, 159 insertions(+), 44 deletions(-)
 
 
-base-commit: d35a535d3e3e71f92a051d94e415f43612c4edfc
+base-commit: 651694bc47a15b99e756ebb27f4e6be6d59bf397
 -- 
-2.55.0
+2.56.0
 

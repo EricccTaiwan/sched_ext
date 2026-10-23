@@ -1,8 +1,16 @@
-From dea1437d537e1a9e2c1126b48e37bedb45fa6a9b Mon Sep 17 00:00:00 2001
+From 698148e95d70fad2b10ddc5ee449e0e568ed4a48 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Mon, 28 Sep 2026 19:26:07 +0000
-Subject: [PATCH sched_ext/for-7.3-fixes 2/2] sched_ext: Fall back to the node
+Subject: [PATCH sched_ext/for-7.4-fixes 2/2] sched_ext: Fall back to the node
  mask when a CPU's LLC map is empty
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 cpu_llc_mask() trusts the last cacheinfo leaf of a CPU as soon as the
 leaves are allocated. When cache detection fails, e.g. on arm64 or
@@ -13,7 +21,7 @@ LLC doesn't contain the CPU and the WARN_ON_ONCE() containment check
 fails. With a detection failure injected for CPU 0 on x86:
 
   cacheinfo: Unable to detect cache hierarchy for CPU 0
-  WARNING: kernel/sched/ext/cid.c:262 at scx_cid_init.cold+0xa6d/0xc1c
+  WARNING: kernel/sched/ext/cid.c:267 at scx_cid_init+0x148c/0x2050
   sched_ext: minimal: scx_root_enable() failed (-22)
 
 scx_cid_init() runs for every root scheduler, cpu-form ones included,
@@ -32,10 +40,10 @@ Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
  1 file changed, 13 insertions(+), 8 deletions(-)
 
 diff --git a/kernel/sched/ext/cid.c b/kernel/sched/ext/cid.c
-index d27f44bf331e..a83dc96bd54f 100644
+index 0b046e995f12..a5150d05d2f4 100644
 --- a/kernel/sched/ext/cid.c
 +++ b/kernel/sched/ext/cid.c
-@@ -34,19 +34,24 @@ static struct scx_cid_tables *scx_cid_tables;	/* used only during alloc/free */
+@@ -35,19 +35,24 @@ static struct scx_cid_tables *scx_cid_tables;	/* used only during alloc/free */
  }
  
  /*
@@ -67,7 +75,7 @@ index d27f44bf331e..a83dc96bd54f 100644
  }
  
  /*
-@@ -362,7 +367,7 @@ s32 scx_cid_init(struct scx_sched *sch)
+@@ -393,7 +398,7 @@ s32 scx_cid_init(struct scx_sched *sch)
  	}
  
  	if (!cpumask_empty(llc_fallback))
@@ -77,5 +85,5 @@ index d27f44bf331e..a83dc96bd54f 100644
  	if (!cpumask_empty(online_no_topo))
  		pr_warn("scx_cid: online cpus with no usable topology: %*pbl\n",
 -- 
-2.55.0
+2.56.0
 
