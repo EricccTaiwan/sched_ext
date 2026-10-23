@@ -10,45 +10,21 @@
 #include "create_dsq.bpf.skel.h"
 #include "scx_test.h"
 
-static enum scx_test_status setup(void **ctx)
-{
-	struct create_dsq *skel;
-
-	skel = create_dsq__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(create_dsq__load(skel), "Failed to load skel");
-
-	*ctx = skel;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(create_dsq)
 
 static enum scx_test_status run(void *ctx)
 {
-	struct create_dsq *skel = ctx;
-	struct bpf_link *link;
+	struct create_dsq_ctx *tctx = ctx;
 
-	link = bpf_map__attach_struct_ops(skel->maps.create_dsq_ops);
-	if (!link) {
-		SCX_ERR("Failed to attach scheduler");
-		return SCX_TEST_FAIL;
-	}
+	SCX_TEST_ATTACH(tctx, create_dsq_ops);
+	SCX_ASSERT_ALIVE(tctx->skel, uei);
 
-	SCX_ASSERT_ALIVE(skel, uei);
+	bpf_link__destroy(tctx->link);
+	tctx->link = NULL;
 
-	bpf_link__destroy(link);
-
-	SCX_EQ(skel->bss->nr_lifecycle_tests, 1024);
+	SCX_EQ(tctx->skel->bss->nr_lifecycle_tests, 1024);
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct create_dsq *skel = ctx;
-
-	create_dsq__destroy(skel);
 }
 
 struct scx_test create_dsq = {

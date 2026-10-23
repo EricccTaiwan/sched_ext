@@ -10,43 +10,36 @@
 #include "maximal.bpf.skel.h"
 #include "scx_test.h"
 
+SCX_TEST_DEFINE_CTX_TYPE(maximal);
+SCX_TEST_DEFINE_CLEANUP(maximal)
+
 static enum scx_test_status setup(void **ctx)
 {
-	struct maximal *skel;
+	struct maximal_ctx *tctx;
 
-	skel = maximal__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(maximal__load(skel), "Failed to load skel");
+	SCX_TEST_OPEN(tctx, maximal);
+	SCX_TEST_LOAD(tctx, maximal);
 
-	bpf_map__set_autoattach(skel->maps.maximal_ops, false);
-	SCX_FAIL_IF(maximal__attach(skel), "Failed to attach skel");
+	bpf_map__set_autoattach(tctx->skel->maps.maximal_ops, false);
+	if (maximal__attach(tctx->skel)) {
+		maximal__destroy(tctx->skel);
+		free(tctx);
+		SCX_FAIL("Failed to attach skel");
+	}
 
-	*ctx = skel;
+	*ctx = tctx;
 
 	return SCX_TEST_PASS;
 }
 
 static enum scx_test_status run(void *ctx)
 {
-	struct maximal *skel = ctx;
-	struct bpf_link *link;
+	struct maximal_ctx *tctx = ctx;
 
-	link = bpf_map__attach_struct_ops(skel->maps.maximal_ops);
-	SCX_FAIL_IF(!link, "Failed to attach scheduler");
-
-	SCX_ASSERT_ALIVE(skel, uei);
-
-	bpf_link__destroy(link);
+	SCX_TEST_ATTACH(tctx, maximal_ops);
+	SCX_ASSERT_ALIVE(tctx->skel, uei);
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct maximal *skel = ctx;
-
-	maximal__destroy(skel);
 }
 
 struct scx_test maximal = {
