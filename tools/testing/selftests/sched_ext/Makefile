@@ -171,6 +171,7 @@ auto-test-targets :=			\
 	dequeue_iter			\
 	dequeue_remote			\
 	enq_blocked			\
+	enq_last_exiting		\
 	enq_last_no_enq_fails		\
 	ddsp_bogus_dsq_fail		\
 	ddsp_vtimelocal_fail		\
