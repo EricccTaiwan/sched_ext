@@ -30,6 +30,8 @@ static enum scx_test_status run(void *ctx)
 	struct prog_run *skel = ctx;
 	struct bpf_link *link = NULL;
 	enum scx_test_status status = SCX_TEST_PASS;
+	/* EXIT_KIND() returns on failure, so resolve it before attaching */
+	u64 unreg_bpf = EXIT_KIND(SCX_EXIT_UNREG_BPF);
 	int prog_fd, err = 0;
 
 	prog_fd = bpf_program__fd(skel->progs.prog_run_syscall);
@@ -61,7 +63,7 @@ static enum scx_test_status run(void *ctx)
 		goto out;
 	}
 
-	if (skel->data->uei.kind != EXIT_KIND(SCX_EXIT_UNREG_BPF)) {
+	if (skel->data->uei.kind != unreg_bpf) {
 		SCX_ERR("Unexpected exit kind: %llu",
 			(unsigned long long)skel->data->uei.kind);
 		status = SCX_TEST_FAIL;
