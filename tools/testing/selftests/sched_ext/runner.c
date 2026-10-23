@@ -88,17 +88,10 @@ static bool should_skip_test(const struct scx_test *test, const char * filter)
 /* Whether a BPF scheduler is loaded, false if sched_ext is unavailable */
 static bool scx_sched_loaded(void)
 {
-	char buf[16] = "";
-	FILE *f;
+	char buf[16];
+	const char *state = scx_sched_state(buf, sizeof(buf));
 
-	f = fopen("/sys/kernel/sched_ext/state", "r");
-	if (!f)
-		return false;
-	if (!fgets(buf, sizeof(buf), f))
-		buf[0] = '\0';
-	fclose(f);
-
-	return buf[0] && strcmp(buf, "disabled\n");
+	return state && strcmp(state, "disabled");
 }
 
 static enum scx_test_status run_test(const struct scx_test *test)

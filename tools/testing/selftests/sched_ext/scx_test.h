@@ -10,8 +10,10 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <scx/common.h>
 #include <scx/compat.h>
+#include "util.h"
 
 enum scx_test_status {
 	SCX_TEST_PASS = 0,
@@ -125,6 +127,33 @@ void scx_test_register(struct scx_test *test);
 				 (unsigned long long)(__skel)->data->__uei.kind, \
 				 (long long)(__skel)->data->__uei.exit_code,	\
 				 (__skel)->data->__uei.msg);			\
+	} while (0)
+
+/*
+ * SCX_CHECK_ENABLED - Return whether the scheduler under test is enabled, and
+ * report the state when it isn't. A root scheduler that fails late in enabling
+ * still attaches successfully and reports the error through ops.exit(), so a
+ * successful attach alone doesn't prove the scheduler ran. Attach waits for the
+ * enable to finish, so the state is final right after it. Also catches a
+ * scheduler that died after enabling, for tests without a uei.
+ */
+#define SCX_CHECK_ENABLED()							\
+	({									\
+		char __buf[16];							\
+		const char *__state = scx_sched_state(__buf, sizeof(__buf));	\
+		bool __enabled = __state && !strcmp(__state, "enabled");	\
+										\
+		if (!__enabled)							\
+			SCX_ERR("Scheduler is not enabled (state: %s)",		\
+				__state ?: "unavailable");			\
+		__enabled;							\
+	})
+
+/* SCX_ASSERT_ENABLED - Fail the test unless SCX_CHECK_ENABLED() passes */
+#define SCX_ASSERT_ENABLED()							\
+	do {									\
+		if (!SCX_CHECK_ENABLED())					\
+			return SCX_TEST_FAIL;					\
 	} while (0)
 
 /*
