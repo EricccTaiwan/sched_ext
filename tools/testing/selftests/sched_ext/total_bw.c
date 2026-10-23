@@ -253,6 +253,18 @@ static int fetch_verify_total_bw(long *bw_values, int nr_cpus)
 	return -1;
 }
 
+/* Unchanged total_bw can't tell a failed enable from a correct one */
+static bool sched_enabled(void)
+{
+	char buf[16];
+	const char *state = scx_sched_state(buf, sizeof(buf));
+
+	if (state && !strcmp(state, "enabled"))
+		return true;
+	SCX_ERR("Scheduler is not enabled (state: %s)", state ?: "unavailable");
+	return false;
+}
+
 static enum scx_test_status setup(void **ctx)
 {
 	struct total_bw_ctx *test_ctx;
@@ -318,6 +330,10 @@ static enum scx_test_status run(void *ctx)
 	link = bpf_map__attach_struct_ops(test_ctx->skel->maps.minimal_ops);
 	if (!link) {
 		SCX_ERR("Failed to attach scheduler");
+		return SCX_TEST_FAIL;
+	}
+	if (!sched_enabled()) {
+		bpf_link__destroy(link);
 		return SCX_TEST_FAIL;
 	}
 
@@ -402,6 +418,11 @@ static enum scx_test_status run(void *ctx)
 	link = bpf_map__attach_struct_ops(test_ctx->skel->maps.minimal_ops);
 	if (!link) {
 		SCX_ERR("Failed to attach scheduler for detach test");
+		ret = SCX_TEST_FAIL;
+		goto restore;
+	}
+	if (!sched_enabled()) {
+		bpf_link__destroy(link);
 		ret = SCX_TEST_FAIL;
 		goto restore;
 	}

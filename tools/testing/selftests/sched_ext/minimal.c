@@ -11,41 +11,16 @@
 #include "minimal.bpf.skel.h"
 #include "scx_test.h"
 
-static enum scx_test_status setup(void **ctx)
-{
-	struct minimal *skel;
-
-	skel = minimal__open();
-	SCX_FAIL_IF(!skel, "Failed to open");
-	SCX_ENUM_INIT(skel);
-	SCX_FAIL_IF(minimal__load(skel), "Failed to load skel");
-
-	*ctx = skel;
-
-	return SCX_TEST_PASS;
-}
+SCX_TEST_DEFINE_CTX(minimal)
 
 static enum scx_test_status run(void *ctx)
 {
-	struct minimal *skel = ctx;
-	struct bpf_link *link;
+	struct minimal_ctx *tctx = ctx;
 
-	link = bpf_map__attach_struct_ops(skel->maps.minimal_ops);
-	if (!link) {
-		SCX_ERR("Failed to attach scheduler");
-		return SCX_TEST_FAIL;
-	}
-
-	bpf_link__destroy(link);
+	SCX_TEST_ATTACH(tctx, minimal_ops);
+	SCX_ASSERT_ENABLED();
 
 	return SCX_TEST_PASS;
-}
-
-static void cleanup(void *ctx)
-{
-	struct minimal *skel = ctx;
-
-	minimal__destroy(skel);
 }
 
 struct scx_test minimal = {
