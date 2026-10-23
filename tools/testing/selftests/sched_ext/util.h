@@ -21,5 +21,7 @@ struct scx_test_gated_worker scx_test_spawn_gated_worker(int cpu, bool set_sched
 bool scx_test_start_gated_worker(struct scx_test_gated_worker *worker);
 void scx_test_stop_gated_worker(struct scx_test_gated_worker *worker);
 int scx_test_preempt_lazy_mode(void);
+/* Read /sys/kernel/sched_ext/state into @buf, NULL if it can't be read */
+const char *scx_sched_state(char *buf, size_t len);
 
 #endif // __SCX_TEST_UTIL_H__

@@ -212,3 +212,12 @@ int scx_test_preempt_lazy_mode(void)
 
 	return config_preempt_lazy_mode();
 }
+
+const char *scx_sched_state(char *buf, size_t len)
+{
+	if (read_text("/sys/kernel/sched_ext/state", buf, len) <= 0)
+		return NULL;
+	buf[strcspn(buf, "\n")] = '\0';
+
+	return buf;
+}
