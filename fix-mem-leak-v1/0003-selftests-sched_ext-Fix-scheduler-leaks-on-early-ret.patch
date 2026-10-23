@@ -1,8 +1,17 @@
-From 00b47828f8a2b8f35bb9206c86db597c9a87cba4 Mon Sep 17 00:00:00 2001
+From 8fc694069f5db262c31ba54bf58a8c30187c4705 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:07 +0000
-Subject: [PATCH sched_ext/for-7.4 3/6] selftests/sched_ext: Fix scheduler
+Subject: [PATCH sched_ext/for-7.5 3/7] selftests/sched_ext: Fix scheduler
  leaks on early return in test helpers
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 exit, hotplug and init_enable_count open the skeleton outside setup(),
 and dequeue attaches the link once per scenario, so the test context
@@ -11,7 +20,9 @@ teardown first, as commit e655c1f1bd14
 ("selftests/sched_ext: Fix bpf_link leak on early return in prog_run")
 did, and let the wait loops reap every child before reporting.
 
-hotplug also calls UEI_REPORT(), which prints to stderr, only once.
+exit resolves the exit kind before opening its skeleton, as EXIT_KIND()
+returns on failure. hotplug also calls UEI_REPORT(), which prints to
+stderr, only once.
 init_enable_count waits for its pre-forked children to exit while SIGCHLD
 is still ignored, so that none of them is left as a zombie.
 
@@ -21,10 +32,10 @@ Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/dequeue.c   |  31 +++-
- tools/testing/selftests/sched_ext/exit.c      |  80 ++++++---
- tools/testing/selftests/sched_ext/hotplug.c   |  69 +++++---
- .../selftests/sched_ext/init_enable_count.c   | 162 +++++++++++++-----
- 4 files changed, 241 insertions(+), 101 deletions(-)
+ tools/testing/selftests/sched_ext/exit.c      |  87 ++++++---
+ tools/testing/selftests/sched_ext/hotplug.c   |  69 ++++---
+ .../selftests/sched_ext/init_enable_count.c   | 174 +++++++++++++-----
+ 4 files changed, 254 insertions(+), 107 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/dequeue.c b/tools/testing/selftests/sched_ext/dequeue.c
 index 383d06e972a4..50e2358083bf 100644
@@ -96,10 +107,10 @@ index 383d06e972a4..50e2358083bf 100644
  
  	/* Calculate deltas */
 diff --git a/tools/testing/selftests/sched_ext/exit.c b/tools/testing/selftests/sched_ext/exit.c
-index 01b17092d5c8..71f6344d222d 100644
+index fd6f1c9ab2db..1632d01ceaef 100644
 --- a/tools/testing/selftests/sched_ext/exit.c
 +++ b/tools/testing/selftests/sched_ext/exit.c
-@@ -13,14 +13,63 @@
+@@ -13,14 +13,66 @@
  
  #include "exit_test.h"
  
@@ -107,6 +118,7 @@ index 01b17092d5c8..71f6344d222d 100644
 +{
 +	enum scx_test_status status = SCX_TEST_FAIL;
 +	struct bpf_link *link = NULL;
++	u64 unreg_bpf = EXIT_KIND(SCX_EXIT_UNREG_BPF);
 +	struct exit *skel;
 +	char buf[16];
 +
@@ -126,10 +138,12 @@ index 01b17092d5c8..71f6344d222d 100644
 +	}
 +
 +	/* Assumes uei.kind is written last */
-+	while (skel->data->uei.kind == EXIT_KIND(SCX_EXIT_NONE))
-+		sched_yield();
++	if (!SCX_TIMED_WAIT_UEI(skel, uei, 10000)) {
++		SCX_ERR("Timed out waiting for scheduler to exit");
++		goto out;
++	}
 +
-+	if (skel->data->uei.kind != EXIT_KIND(SCX_EXIT_UNREG_BPF)) {
++	if (skel->data->uei.kind != unreg_bpf) {
 +		SCX_ERR("Unexpected exit kind: %llu",
 +			(unsigned long long)skel->data->uei.kind);
 +		goto out;
@@ -166,7 +180,7 @@ index 01b17092d5c8..71f6344d222d 100644
  
  		/*
  		 * On single-CPU systems, ops.select_cpu() is never
-@@ -30,28 +79,9 @@ static enum scx_test_status run(void *ctx)
+@@ -30,32 +82,9 @@ static enum scx_test_status run(void *ctx)
  		if (tc == EXIT_SELECT_CPU && libbpf_num_possible_cpus() == 1)
  			continue;
  
@@ -183,8 +197,12 @@ index 01b17092d5c8..71f6344d222d 100644
 -		}
 -
 -		/* Assumes uei.kind is written last */
--		while (skel->data->uei.kind == EXIT_KIND(SCX_EXIT_NONE))
--			sched_yield();
+-		if (!SCX_TIMED_WAIT_UEI(skel, uei, 10000)) {
+-			SCX_ERR("Timed out waiting for scheduler to exit");
+-			bpf_link__destroy(link);
+-			exit__destroy(skel);
+-			return SCX_TEST_FAIL;
+-		}
 -
 -		SCX_EQ(skel->data->uei.kind, EXIT_KIND(SCX_EXIT_UNREG_BPF));
 -		SCX_EQ(skel->data->uei.exit_code, tc);
@@ -199,7 +217,7 @@ index 01b17092d5c8..71f6344d222d 100644
  
  	return SCX_TEST_PASS;
 diff --git a/tools/testing/selftests/sched_ext/hotplug.c b/tools/testing/selftests/sched_ext/hotplug.c
-index 10b8d42bd89b..1d12b3fcd703 100644
+index 3c07686a93c8..0c970be18c07 100644
 --- a/tools/testing/selftests/sched_ext/hotplug.c
 +++ b/tools/testing/selftests/sched_ext/hotplug.c
 @@ -45,21 +45,14 @@ static enum scx_test_status setup(void **ctx)
@@ -256,9 +274,9 @@ index 10b8d42bd89b..1d12b3fcd703 100644
  	}
  
  	if (toggle_online_status(onlining ? 1 : 0))
-@@ -88,8 +92,17 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
- 	while (!UEI_EXITED(skel, uei))
- 		sched_yield();
+@@ -90,8 +94,17 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
+ 		goto out_destroy_link;
+ 	}
  
 -	SCX_EQ(skel->data->uei.kind, kind);
 -	SCX_EQ(UEI_REPORT(skel, uei), code);
@@ -276,7 +294,7 @@ index 10b8d42bd89b..1d12b3fcd703 100644
  
  	if (!onlining && toggle_online_status(1))
  		goto out_destroy_link;
-@@ -106,13 +119,18 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
+@@ -108,13 +121,18 @@ static enum scx_test_status test_hotplug(bool onlining, bool cbs_defined)
  static enum scx_test_status test_hotplug_attach(void)
  {
  	struct hotplug *skel;
@@ -296,7 +314,7 @@ index 10b8d42bd89b..1d12b3fcd703 100644
  	skel = SCX_OPS_OPEN(hotplug_nocb_ops, hotplug);
  	SCX_ASSERT(skel);
  
-@@ -129,15 +147,24 @@ static enum scx_test_status test_hotplug_attach(void)
+@@ -131,17 +149,26 @@ static enum scx_test_status test_hotplug_attach(void)
  	if (toggle_online_status(1))
  		goto out_destroy_link;
  
@@ -305,8 +323,10 @@ index 10b8d42bd89b..1d12b3fcd703 100644
 +		SCX_ERR("Failed to attach scheduler");
 +		goto out_destroy_skel;
 +	}
- 	while (!UEI_EXITED(skel, uei))
- 		sched_yield();
+ 	if (!SCX_TIMED_WAIT_UEI(skel, uei, 10000)) {
+ 		SCX_ERR("Timed out waiting for scheduler to exit");
+ 		goto out_destroy_link;
+ 	}
  
 -	kind = SCX_KIND_VAL(SCX_EXIT_UNREG_KERN);
 -	code = SCX_ECODE_VAL(SCX_ECODE_ACT_RESTART) |
@@ -328,10 +348,10 @@ index 10b8d42bd89b..1d12b3fcd703 100644
  	status = SCX_TEST_PASS;
  out_destroy_link:
 diff --git a/tools/testing/selftests/sched_ext/init_enable_count.c b/tools/testing/selftests/sched_ext/init_enable_count.c
-index 44577e30e764..4c8e1b93593a 100644
+index c4a57038a1d6..3171cf46247b 100644
 --- a/tools/testing/selftests/sched_ext/init_enable_count.c
 +++ b/tools/testing/selftests/sched_ext/init_enable_count.c
-@@ -16,26 +16,80 @@
+@@ -17,26 +17,87 @@
  
  #define SCHED_EXT 7
  
@@ -348,6 +368,13 @@ index 44577e30e764..4c8e1b93593a 100644
 +}
 +
 +/* In helpers, so a failing SCX_*() check cannot skip run_test()'s teardown */
++static enum scx_test_status check_alive(const struct init_enable_count *skel)
++{
++	SCX_ASSERT_ALIVE(skel, uei);
++
++	return SCX_TEST_PASS;
++}
++
 +static enum scx_test_status check_pre_fork_counts(const struct init_enable_count *skel,
 +						  u32 num_pre_forks)
 +{
@@ -418,7 +445,7 @@ index 44577e30e764..4c8e1b93593a 100644
  
  	/*
  	 * Fork a bunch of children before we attach the scheduler so that we
-@@ -52,7 +106,10 @@ static enum scx_test_status run_test(bool global)
+@@ -53,7 +114,10 @@ static enum scx_test_status run_test(bool global)
  	for (i = 0; i < num_pre_forks; i++) {
  		pid_t pid = fork();
  
@@ -430,7 +457,7 @@ index 44577e30e764..4c8e1b93593a 100644
  		if (pid == 0) {
  			char buf;
  
-@@ -64,26 +121,35 @@ static enum scx_test_status run_test(bool global)
+@@ -65,17 +129,24 @@ static enum scx_test_status run_test(bool global)
  		}
  	}
  	close(pipe_fds[0]);
@@ -449,11 +476,21 @@ index 44577e30e764..4c8e1b93593a 100644
 +	pipe_fds[1] = -1;
 +	reap_prefork_children();
  
+-	SCX_ASSERT_ALIVE(skel, uei);
++	if (check_alive(skel) != SCX_TEST_PASS)
++		goto out;
+ 
  	bpf_link__destroy(link);
++	link = NULL;
+ 
+ 	/*
+ 	 * The clean unregister above is recorded in uei and would
+@@ -84,17 +155,19 @@ static enum scx_test_status run_test(bool global)
+ 	 */
+ 	memset(&skel->data->uei, 0, sizeof(skel->data->uei));
+ 
 -	SCX_GE(skel->bss->init_task_cnt, num_pre_forks);
 -	SCX_GE(skel->bss->exit_task_cnt, num_pre_forks);
-+	link = NULL;
-+
 +	if (check_pre_fork_counts(skel, num_pre_forks) != SCX_TEST_PASS)
 +		goto out;
  
@@ -473,7 +510,7 @@ index 44577e30e764..4c8e1b93593a 100644
  		if (pids[i] == 0) {
  			ret = sched_setscheduler(0, SCHED_EXT, &param);
  			SCX_BUG_ON(ret, "Failed to set sched to sched_ext");
-@@ -100,54 +166,58 @@ static enum scx_test_status run_test(bool global)
+@@ -111,56 +184,61 @@ static enum scx_test_status run_test(bool global)
  			}
  			exit(0);
  		}
@@ -518,9 +555,18 @@ index 44577e30e764..4c8e1b93593a 100644
 +			continue;
 +		if (waitpid(pids[i], &wstatus, 0) != pids[i] || wstatus)
 +			nfailed++;
++	}
++	if (nforked < num_children || nfailed) {
++		SCX_ERR("Normal children: forked %d of %u, %d failed",
++			nforked, num_children, nfailed);
++		goto out;
  	}
--
--	bpf_link__destroy(link);
+ 
+-	SCX_ASSERT_ALIVE(skel, uei);
++	if (check_alive(skel) != SCX_TEST_PASS)
++		goto out;
+ 
+ 	bpf_link__destroy(link);
 -
 -	SCX_GE(skel->bss->init_task_cnt, 2 * num_children);
 -	SCX_GE(skel->bss->exit_task_cnt, 2 * num_children);
@@ -531,11 +577,7 @@ index 44577e30e764..4c8e1b93593a 100644
 -	} else {
 -		SCX_EQ(skel->bss->enable_cnt, num_children);
 -		SCX_EQ(skel->bss->disable_cnt, num_children);
-+	if (nforked < num_children || nfailed) {
-+		SCX_ERR("Normal children: forked %d of %u, %d failed",
-+			nforked, num_children, nfailed);
-+		goto out;
- 	}
+-	}
 -	/*
 -	 * We forked a ton of tasks before we attached the scheduler above, so
 -	 * this should be fine. Technically it could be flaky if a ton of forks
@@ -544,8 +586,7 @@ index 44577e30e764..4c8e1b93593a 100644
 -	 */
 -	SCX_GT(skel->bss->init_transition_cnt, skel->bss->init_fork_cnt);
 -	SCX_GE(skel->bss->init_fork_cnt, 2 * num_children);
- 
-+	bpf_link__destroy(link);
+-
 +	link = NULL;
 +
 +	status = check_counts(skel, global, num_children);
@@ -565,5 +606,5 @@ index 44577e30e764..4c8e1b93593a 100644
  
  static enum scx_test_status run(void *ctx)
 -- 
-2.55.0
+2.56.0
 

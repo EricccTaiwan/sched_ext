@@ -1,8 +1,17 @@
-From 5ae78accca6ee3f616897e90ac65a7e8ea002161 Mon Sep 17 00:00:00 2001
+From a3f1a6824fde0cf5d8e581a4c43ca5fc8719fa85 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:35 +0000
-Subject: [PATCH sched_ext/for-7.4 5/6] selftests/sched_ext: Fix scheduler leak
+Subject: [PATCH sched_ext/for-7.5 5/7] selftests/sched_ext: Fix scheduler leak
  on early return in enable_cmask
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 enable_cmask opens its skeleton in run(), and its SCX_*() checks return
 without destroying the link or the skeleton. A failing check leaves the
@@ -131,5 +140,5 @@ index 556bcad4431d..ff3bb5f3ba64 100644
  
  struct scx_test enable_cmask = {
 -- 
-2.55.0
+2.56.0
 

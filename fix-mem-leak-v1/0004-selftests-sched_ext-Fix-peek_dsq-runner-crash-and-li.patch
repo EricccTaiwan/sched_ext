@@ -1,8 +1,17 @@
-From 0368d5a4828503c039b87c496d67377fda0a44f0 Mon Sep 17 00:00:00 2001
+From 26d19f77bba30bcfdf3153c6d39ab625d742182c Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 05:04:25 +0000
-Subject: [PATCH sched_ext/for-7.4 4/6] selftests/sched_ext: Fix peek_dsq
+Subject: [PATCH sched_ext/for-7.5 4/7] selftests/sched_ext: Fix peek_dsq
  runner crash and link leak on failure
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 cleanup() joins the workload threads whenever workload_running is set,
 and it starts out true. If attaching fails, run() returns before
@@ -70,5 +79,5 @@ index a717384a3224..6dd29e22da10 100644
  }
  
 -- 
-2.55.0
+2.56.0
 

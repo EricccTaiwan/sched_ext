@@ -1,8 +1,17 @@
-From 0bb7ea49b4e1fa4f4feaf071f6947ca70d427f64 Mon Sep 17 00:00:00 2001
+From 1b0e7b4f09b9860ea4b2961599efc5eedd4b98a6 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
-Subject: [PATCH sched_ext/for-7.4 1/6] selftests/sched_ext: Add test context
+Subject: [PATCH sched_ext/for-7.5 1/7] selftests/sched_ext: Add test context
  helpers for skeleton and link
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 SCX_*() assertions return from run(), so a bpf_link__destroy() at the
 end of run() is skipped when a check fails. The scheduler then stays
@@ -20,7 +29,7 @@ Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
  1 file changed, 88 insertions(+)
 
 diff --git a/tools/testing/selftests/sched_ext/scx_test.h b/tools/testing/selftests/sched_ext/scx_test.h
-index 90b8d6915bb7..f65571228773 100644
+index 8490b01fff74..9bb364b391f1 100644
 --- a/tools/testing/selftests/sched_ext/scx_test.h
 +++ b/tools/testing/selftests/sched_ext/scx_test.h
 @@ -9,6 +9,7 @@
@@ -31,9 +40,9 @@ index 90b8d6915bb7..f65571228773 100644
  #include <scx/common.h>
  #include <scx/compat.h>
  
-@@ -128,4 +129,91 @@ void scx_test_register(struct scx_test *test);
- 	__val;									\
- })
+@@ -173,4 +174,91 @@ void scx_test_register(struct scx_test *test);
+  */
+ #define EXIT_KIND(__ent) SCX_KIND_VAL(__ent)
  
 +/*
 + * Test context owning a skeleton and its struct_ops link. cleanup() destroys
@@ -124,5 +133,5 @@ index 90b8d6915bb7..f65571228773 100644
 +
  #endif  // # __SCX_TEST_H__
 -- 
-2.55.0
+2.56.0
 

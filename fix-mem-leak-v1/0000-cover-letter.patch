@@ -1,11 +1,12 @@
-From d1f725a24d737e1a6d182e07c420cd723bb9308e Mon Sep 17 00:00:00 2001
+From 3c0869e480b2483123c4140c7b14c1454e969415 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
-Date: Tue, 29 Sep 2026 02:38:27 +0000
-Subject: [PATCH sched_ext/for-7.4 0/6] selftests/sched_ext: Fix scheduler leaks on early return
+Date: Fri, 23 Oct 2026 15:52:21 +0000
+Subject: [PATCH sched_ext/for-7.5 0/7] selftests/sched_ext: Fix scheduler leaks on early return
 To: Tejun Heo <tj@kernel.org>
 Cc: David Vernet <void@manifault.com>,
     Andrea Righi <arighi@nvidia.com>,
     Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
     Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
     Chia-Ping Tsai <chia7712@gmail.com>,
     sched-ext@lists.linux.dev,
@@ -30,19 +31,28 @@ to the other selftests [1]. This series does that:
      more than once, and route their early returns through the teardown
   4: fix the peek_dsq runner crash and its own link leak
   5: fix the same leak in enable_cmask
-  6: make the runner fail and name a test that leaves a scheduler
+  6: fix the leaks that the new SCX_ASSERT_ALIVE() and EXIT_KIND()
+     early returns added to create_dsq, maximal and prog_run
+  7: make the runner fail and name a test that leaves a scheduler
      loaded, so a future leak points at the right test
 
-Tested with vng on for-7.4: all tests pass, with nohz_tick skipped as
-it needs nohz_full=. Forcing failures in enq_select_cpu,
-enq_last_no_enq_fails and peek_dsq now fails only those three tests.
+The series is on top of Tao's selftest fixes in for-7.4 and keeps
+their bounded exit waits and SCX_ASSERT_ALIVE() checks. Those make
+more checks fail cleanly, which is why patch 6 is needed.
+
+Tested with vng on for-7.5: all tests pass, with enq_blocked and
+nohz_tick skipped as they need CONFIG_SCHED_PROXY_EXEC and nohz_full=.
+Forcing failures in create_dsq, maximal, init_enable_count, exit,
+hotplug, prog_run and enq_select_cpu now fails only those seven tests.
+Without the series, forcing the create_dsq failure makes the tests
+after it fail to attach, and the runner then crashes in peek_dsq.
 
 checkpatch --strict reports 1 warning and 6 checks on patch 1, all
 about the new token-pasting macros in scx_test.h.
 
 [1] https://lore.kernel.org/r/af2aD8-tFi_yhPOV@gpd4
 
-Cheng-Yang Chou (6):
+Cheng-Yang Chou (7):
   selftests/sched_ext: Add test context helpers for skeleton and link
   selftests/sched_ext: Fix bpf_link leaks on early return from run()
   selftests/sched_ext: Fix scheduler leaks on early return in test
@@ -51,31 +61,36 @@ Cheng-Yang Chou (6):
     failure
   selftests/sched_ext: Fix scheduler leak on early return in
     enable_cmask
+  selftests/sched_ext: Fix link leaks in create_dsq, maximal and
+    prog_run
   selftests/sched_ext: Fail tests that leave a scheduler loaded
 
- .../selftests/sched_ext/ddsp_bogus_dsq_fail.c |  30 +---
- .../sched_ext/ddsp_vtimelocal_fail.c          |  30 +---
+ .../testing/selftests/sched_ext/create_dsq.c  |  38 +---
+ .../selftests/sched_ext/ddsp_bogus_dsq_fail.c |  30 +--
+ .../sched_ext/ddsp_vtimelocal_fail.c          |  30 +--
  tools/testing/selftests/sched_ext/dequeue.c   |  31 +++-
- .../selftests/sched_ext/enable_cmask.c        |  67 ++++++--
+ .../selftests/sched_ext/enable_cmask.c        |  67 +++++--
  .../sched_ext/enq_last_no_enq_fails.c         |  37 +---
  .../selftests/sched_ext/enq_select_cpu.c      |  35 +---
- tools/testing/selftests/sched_ext/exit.c      |  80 ++++++---
- tools/testing/selftests/sched_ext/hotplug.c   |  69 +++++---
- .../selftests/sched_ext/init_enable_count.c   | 162 +++++++++++++-----
+ tools/testing/selftests/sched_ext/exit.c      |  87 ++++++---
+ tools/testing/selftests/sched_ext/hotplug.c   |  69 ++++---
+ .../selftests/sched_ext/init_enable_count.c   | 174 +++++++++++++-----
+ tools/testing/selftests/sched_ext/maximal.c   |  39 ++--
  tools/testing/selftests/sched_ext/numa.c      |  33 ++--
  tools/testing/selftests/sched_ext/peek_dsq.c  |  15 +-
- tools/testing/selftests/sched_ext/runner.c    |  39 ++++-
- tools/testing/selftests/sched_ext/scx_test.h  |  88 ++++++++++
- .../selftests/sched_ext/select_cpu_dfl.c      |  51 +-----
+ tools/testing/selftests/sched_ext/prog_run.c  |   4 +-
+ tools/testing/selftests/sched_ext/runner.c    |  39 +++-
+ tools/testing/selftests/sched_ext/scx_test.h  |  88 +++++++++
+ .../selftests/sched_ext/select_cpu_dfl.c      |  51 +----
  .../sched_ext/select_cpu_dfl_nodispatch.c     |  44 ++---
  .../selftests/sched_ext/select_cpu_dispatch.c |  41 ++---
- .../sched_ext/select_cpu_dispatch_bad_dsq.c   |  30 +---
- .../sched_ext/select_cpu_dispatch_dbl_dsp.c   |  30 +---
+ .../sched_ext/select_cpu_dispatch_bad_dsq.c   |  30 +--
+ .../sched_ext/select_cpu_dispatch_dbl_dsp.c   |  30 +--
  .../selftests/sched_ext/select_cpu_vtime.c    |  33 +---
- 19 files changed, 491 insertions(+), 454 deletions(-)
+ 22 files changed, 530 insertions(+), 515 deletions(-)
 
 
-base-commit: 9fa10e3bc7ec61010aa91cfca6118218e3bab773
+base-commit: bbd3a328803509e8639fb7bb87b9e29a68422712
 -- 
-2.55.0
+2.56.0
 

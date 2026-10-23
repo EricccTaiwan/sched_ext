@@ -1,8 +1,17 @@
-From d1f725a24d737e1a6d182e07c420cd723bb9308e Mon Sep 17 00:00:00 2001
+From 3c0869e480b2483123c4140c7b14c1454e969415 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Sat, 26 Sep 2026 20:04:47 +0000
-Subject: [PATCH sched_ext/for-7.4 6/6] selftests/sched_ext: Fail tests that
+Subject: [PATCH sched_ext/for-7.5 7/7] selftests/sched_ext: Fail tests that
  leave a scheduler loaded
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 A test that leaves its BPF scheduler loaded does not fail itself. The
 tests that run after it fail to attach instead, which points at the
@@ -77,5 +86,5 @@ index 57dda75384f1..9b90ac0fc7b3 100644
  	return status;
  }
 -- 
-2.55.0
+2.56.0
 

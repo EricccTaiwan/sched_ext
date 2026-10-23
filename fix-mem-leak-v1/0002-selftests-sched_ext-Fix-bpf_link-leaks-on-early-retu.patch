@@ -1,8 +1,17 @@
-From afc0cc13c99209e6da1b6d4ba245cc4934e69a81 Mon Sep 17 00:00:00 2001
+From 9d29b73401dca330d083c8cc9b40c5d17fa75cc1 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
-Subject: [PATCH sched_ext/for-7.4 2/6] selftests/sched_ext: Fix bpf_link leaks
+Subject: [PATCH sched_ext/for-7.5 2/7] selftests/sched_ext: Fix bpf_link leaks
  on early return from run()
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Tao Cui <cuitao@kylinos.cn>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
 
 Ten tests destroy the link at the end of run(), after checks that can
 return early. Convert them to the context helpers so that cleanup()
@@ -715,5 +724,5 @@ index 1e9b5c9bfff1..475b58ab64bb 100644
  	.name = "select_cpu_vtime",
  	.description = "Test doing direct vtime-dispatching from "
 -- 
-2.55.0
+2.56.0
 
