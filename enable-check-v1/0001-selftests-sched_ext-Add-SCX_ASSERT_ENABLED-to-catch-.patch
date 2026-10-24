@@ -1,4 +1,4 @@
-From b8b9ff897986311f6d2e5ad591124f659a430cd7 Mon Sep 17 00:00:00 2001
+From be12617a5437a24b0a6d2c710b3253e1da1df857 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 17:48:09 +0000
 Subject: [PATCH sched_ext/for-7.5 1/2] selftests/sched_ext: Add

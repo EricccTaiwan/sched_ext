@@ -1,4 +1,4 @@
-From 16bf1828805e5f3a8718d3f7759ad409133403b6 Mon Sep 17 00:00:00 2001
+From 1c35b83712b71c3e10dd52dc2f9aef6947243fc8 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:35 +0000
 Subject: [PATCH sched_ext/for-7.5 5/7] selftests/sched_ext: Fix scheduler leak

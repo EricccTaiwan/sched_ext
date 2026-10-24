@@ -1,4 +1,4 @@
-From 231271a8f04feb39a12081de1bff7b44bc870b4f Mon Sep 17 00:00:00 2001
+From ac53ce20f78cb3ee6984fe30cf2eb60e242a3612 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:07 +0000
 Subject: [PATCH sched_ext/for-7.5 3/7] selftests/sched_ext: Fix scheduler

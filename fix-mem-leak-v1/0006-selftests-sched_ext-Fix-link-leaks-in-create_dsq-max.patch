@@ -1,4 +1,4 @@
-From be25a0e55149b1b665d7a73440701466b805e8b4 Mon Sep 17 00:00:00 2001
+From c677440a7ae28e6888a984515f08b6194b0fb8d4 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 15:38:48 +0000
 Subject: [PATCH sched_ext/for-7.5 6/7] selftests/sched_ext: Fix link leaks in
