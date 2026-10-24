@@ -1,4 +1,4 @@
-From 9d605ef30406760b0ab23e56760a216ce87a5902 Mon Sep 17 00:00:00 2001
+From 303b90cc2cadc09fd0b824d00830fda971a7befc Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 20:51:52 +0000
 Subject: [PATCH sched_ext/for-7.5] selftests/sched_ext: Test that an exiting
@@ -24,21 +24,21 @@ SCX_OPS_ENQ_EXITING and uses 1ms slices. It repeatedly has a task pinned
 to one CPU fault in 256MB and exit, so the slice expires while the task
 tears down its address space. ops.update_idle() and ops.running() time
 how long a CPU stays idle with tasks on its local DSQ, and the test
-fails if that exceeds 1ms. ops.enqueue() kicks the CPU for SCX_ENQ_LAST
+fails if that exceeds 10ms. ops.enqueue() kicks the CPU for SCX_ENQ_LAST
 tasks it sees, so only the exiting path that bypasses ops.enqueue() can
 strand a task.
 
 In KASAN VMs with 2, 4 and 8 CPUs, the longest such idle period stays
-under 0.3ms with the fix. Without it, all 20 runs fail: 2 on idle
-periods of about 3s and 18 on a watchdog stall.
+under 0.3ms with the fix. Without it, all 20 runs fail: 6 on idle
+periods of 0.5s to 3s and 14 on a watchdog stall.
 
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/Makefile    |   1 +
- .../sched_ext/enq_last_exiting.bpf.c          |  89 +++++++++
- .../selftests/sched_ext/enq_last_exiting.c    | 170 ++++++++++++++++++
- 3 files changed, 260 insertions(+)
+ .../sched_ext/enq_last_exiting.bpf.c          |  89 ++++++++++
+ .../selftests/sched_ext/enq_last_exiting.c    | 168 ++++++++++++++++++
+ 3 files changed, 258 insertions(+)
  create mode 100644 tools/testing/selftests/sched_ext/enq_last_exiting.bpf.c
  create mode 100644 tools/testing/selftests/sched_ext/enq_last_exiting.c
 
@@ -151,15 +151,16 @@ index 000000000000..a3a4e0dc9f00
 +};
 diff --git a/tools/testing/selftests/sched_ext/enq_last_exiting.c b/tools/testing/selftests/sched_ext/enq_last_exiting.c
 new file mode 100644
-index 000000000000..df5fce4356cf
+index 000000000000..e920c7a98a59
 --- /dev/null
 +++ b/tools/testing/selftests/sched_ext/enq_last_exiting.c
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,168 @@
 +// SPDX-License-Identifier: GPL-2.0
 +#include <bpf/bpf.h>
 +#include <sched.h>
 +#include <stdio.h>
 +#include <sys/mman.h>
++#include <sys/prctl.h>
 +#include <sys/wait.h>
 +#include <time.h>
 +#include <unistd.h>
@@ -173,9 +174,10 @@ index 000000000000..df5fce4356cf
 +/*
 + * A CPU that goes idle with a task left on its local DSQ is rescheduled right
 + * away, in well under a millisecond even under KASAN. A stranded task waits
-+ * for an unrelated wakeup instead, from milliseconds to seconds.
++ * for an unrelated wakeup instead, often for seconds. Allow 10ms for slow and
++ * overcommitted machines.
 + */
-+#define MAX_IDLE_QUEUED_NS	(1000ULL * 1000)
++#define MAX_IDLE_QUEUED_NS	(10ULL * 1000 * 1000)
 +
 +static enum scx_test_status setup(void **ctx)
 +{
@@ -195,23 +197,19 @@ index 000000000000..df5fce4356cf
 +static void exit_child(int cpu)
 +{
 +	cpu_set_t mask;
-+	size_t off;
-+	char *buf;
++	void *buf;
 +
 +	CPU_ZERO(&mask);
 +	CPU_SET(cpu, &mask);
 +	if (sched_setaffinity(0, sizeof(mask), &mask))
 +		_exit(1);
 +
++	/* Base pages take longer to tear down than THPs */
++	prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
 +	buf = mmap(NULL, EXIT_BYTES, PROT_READ | PROT_WRITE,
-+		   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++		   MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
 +	if (buf == MAP_FAILED)
 +		_exit(1);
-+	/* 4K pages take longer to free than THPs */
-+	madvise(buf, EXIT_BYTES, MADV_NOHUGEPAGE);
-+	/* volatile, or the compiler drops the stores as nothing reads them */
-+	for (off = 0; off < EXIT_BYTES; off += 4096)
-+		((volatile char *)buf)[off] = 1;
 +	_exit(0);
 +}
 +
