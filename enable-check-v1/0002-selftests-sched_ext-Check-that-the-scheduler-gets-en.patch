@@ -1,4 +1,4 @@
-From 77ddf422175f2b703d28e85cef7f0ce7f0ac9010 Mon Sep 17 00:00:00 2001
+From 747a2b08e4da4d25e775c67a020921e5ad084d62 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 17:48:09 +0000
 Subject: [PATCH sched_ext/for-7.5 2/2] selftests/sched_ext: Check that the

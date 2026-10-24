@@ -1,4 +1,4 @@
-From 1c35b83712b71c3e10dd52dc2f9aef6947243fc8 Mon Sep 17 00:00:00 2001
+From e69d1839eabdc6fb03e12d5a1eb9e02f9393823f Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:35 +0000
 Subject: [PATCH sched_ext/for-7.5 5/7] selftests/sched_ext: Fix scheduler leak
@@ -14,8 +14,9 @@ Cc: David Vernet <void@manifault.com>,
     linux-kernel@vger.kernel.org
 
 enable_cmask opens its skeleton in run(), and its SCX_*() checks return
-without destroying the link or the skeleton. A failing check leaves the
-scheduler loaded, so the tests that run after it fail to attach.
+without destroying it. A failed fork() also returns before the link is
+destroyed, which leaves the scheduler loaded, so the tests that run
+after it fail to attach.
 
 Make those failures go through a teardown label, and reap every forked
 child before reporting.

@@ -1,4 +1,4 @@
-From 42c6d8ba5ab2976c6c306d68f737542359c8616f Mon Sep 17 00:00:00 2001
+From 5722e6f62b6a5b349041c2fd19bcf0f5807d455c Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Sat, 26 Sep 2026 20:04:47 +0000
 Subject: [PATCH sched_ext/for-7.5 7/7] selftests/sched_ext: Fail tests that
