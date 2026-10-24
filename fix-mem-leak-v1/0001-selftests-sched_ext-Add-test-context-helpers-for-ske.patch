@@ -1,4 +1,4 @@
-From c76efa6e247a51d54f0712d2fde19d119be629e3 Mon Sep 17 00:00:00 2001
+From 592ae6233fb4cc53a87b11d457effc414e3d1394 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
 Subject: [PATCH sched_ext/for-7.5 1/7] selftests/sched_ext: Add test context

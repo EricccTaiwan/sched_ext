@@ -1,6 +1,6 @@
-From 5722e6f62b6a5b349041c2fd19bcf0f5807d455c Mon Sep 17 00:00:00 2001
+From 8eea104a5ab9857a746014e19812479f5212eff9 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
-Date: Sat, 24 Oct 2026 22:15:01 +0800
+Date: Sat, 24 Oct 2026 22:23:38 +0800
 Subject: [PATCH sched_ext/for-7.5 0/7] selftests/sched_ext: Fix scheduler leaks on early return
 To: Tejun Heo <tj@kernel.org>
 Cc: David Vernet <void@manifault.com>,
@@ -90,7 +90,7 @@ Cheng-Yang Chou (7):
  22 files changed, 530 insertions(+), 515 deletions(-)
 
 
-base-commit: 3faf758fe7e27efdb32c6dfe1c7112ee7937eada
+base-commit: dd3b1d9be27c82e136db727ddd5d67e46ef86428
 -- 
 2.56.0
 

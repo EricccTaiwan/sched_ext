@@ -1,4 +1,4 @@
-From b53093bbe38f8ef5f6ba9c9b4bc6211fff977989 Mon Sep 17 00:00:00 2001
+From 69553afd770874a06cd98d29bd9bcf1446de6f00 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 05:04:25 +0000
 Subject: [PATCH sched_ext/for-7.5 4/7] selftests/sched_ext: Fix peek_dsq
