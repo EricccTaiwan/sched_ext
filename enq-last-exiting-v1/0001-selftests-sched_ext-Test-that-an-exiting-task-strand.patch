@@ -1,0 +1,332 @@
+From 9d605ef30406760b0ab23e56760a216ce87a5902 Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Fri, 23 Oct 2026 20:51:52 +0000
+Subject: [PATCH sched_ext/for-7.5] selftests/sched_ext: Test that an exiting
+ task stranded by SCX_ENQ_LAST runs
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Ching-Chun Huang <jserv@ccns.ncku.edu.tw>,
+    Chia-Ping Tsai <chia7712@gmail.com>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+Without SCX_OPS_ENQ_EXITING, an exiting task skips ops.enqueue() and
+goes to its CPU's local DSQ. When that happened to the last runnable
+task in put_prev_task_scx(), the CPU idled with the task queued until an
+unrelated wakeup or the watchdog. This was fixed by
+commit 7a9df7667963 ("sched_ext: Fix stall when a task enqueued with
+SCX_ENQ_LAST lands back on its CPU's local DSQ").
+
+Add a test whose scheduler sets SCX_OPS_ENQ_LAST without
+SCX_OPS_ENQ_EXITING and uses 1ms slices. It repeatedly has a task pinned
+to one CPU fault in 256MB and exit, so the slice expires while the task
+tears down its address space. ops.update_idle() and ops.running() time
+how long a CPU stays idle with tasks on its local DSQ, and the test
+fails if that exceeds 1ms. ops.enqueue() kicks the CPU for SCX_ENQ_LAST
+tasks it sees, so only the exiting path that bypasses ops.enqueue() can
+strand a task.
+
+In KASAN VMs with 2, 4 and 8 CPUs, the longest such idle period stays
+under 0.3ms with the fix. Without it, all 20 runs fail: 2 on idle
+periods of about 3s and 18 on a watchdog stall.
+
+Assisted-by: Claude:claude-opus-5-5
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/Makefile    |   1 +
+ .../sched_ext/enq_last_exiting.bpf.c          |  89 +++++++++
+ .../selftests/sched_ext/enq_last_exiting.c    | 170 ++++++++++++++++++
+ 3 files changed, 260 insertions(+)
+ create mode 100644 tools/testing/selftests/sched_ext/enq_last_exiting.bpf.c
+ create mode 100644 tools/testing/selftests/sched_ext/enq_last_exiting.c
+
+diff --git a/tools/testing/selftests/sched_ext/Makefile b/tools/testing/selftests/sched_ext/Makefile
+index 44083f1c6596..809f3af0d757 100644
+--- a/tools/testing/selftests/sched_ext/Makefile
++++ b/tools/testing/selftests/sched_ext/Makefile
+@@ -171,6 +171,7 @@ auto-test-targets :=			\
+ 	dequeue_iter			\
+ 	dequeue_remote			\
+ 	enq_blocked			\
++	enq_last_exiting		\
+ 	enq_last_no_enq_fails		\
+ 	ddsp_bogus_dsq_fail		\
+ 	ddsp_vtimelocal_fail		\
+diff --git a/tools/testing/selftests/sched_ext/enq_last_exiting.bpf.c b/tools/testing/selftests/sched_ext/enq_last_exiting.bpf.c
+new file mode 100644
+index 000000000000..a3a4e0dc9f00
+--- /dev/null
++++ b/tools/testing/selftests/sched_ext/enq_last_exiting.bpf.c
+@@ -0,0 +1,89 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * With SCX_OPS_ENQ_LAST but not SCX_OPS_ENQ_EXITING, an exiting task that is
++ * the last runnable task on its CPU skips ops.enqueue() and is queued on the
++ * CPU's local DSQ. The CPU must run it instead of idling with it queued.
++ *
++ * ops.enqueue() keeps a SCX_ENQ_LAST task on its CPU and kicks the CPU, so
++ * only the exiting path that bypasses ops.enqueue() can strand a task.
++ *
++ * A CPU going idle with tasks on its local DSQ is timed until the next task
++ * starts running there. An unrelated wakeup eventually ends a strand, so the
++ * longest such idle period, not a watchdog stall, tells whether it happened.
++ */
++#include <scx/common.bpf.h>
++
++char _license[] SEC("license") = "GPL";
++
++/* Short enough to expire while a task tears down its address space */
++#define SLICE_NS	(1000ULL * 1000)
++
++UEI_DEFINE(uei);
++
++u64 nr_idle_queued;
++u64 max_idle_queued_ns;
++
++struct {
++	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++	__uint(max_entries, 1);
++	__type(key, u32);
++	__type(value, u64);
++} idle_since SEC(".maps");
++
++void BPF_STRUCT_OPS(enq_last_exiting_enqueue, struct task_struct *p,
++		    u64 enq_flags)
++{
++	if (enq_flags & SCX_ENQ_LAST) {
++		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SLICE_NS, enq_flags);
++		scx_bpf_kick_cpu(scx_bpf_task_cpu(p), SCX_KICK_IDLE);
++		return;
++	}
++
++	scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SLICE_NS, enq_flags);
++}
++
++void BPF_STRUCT_OPS(enq_last_exiting_update_idle, s32 cpu, bool idle)
++{
++	u32 zero = 0;
++	u64 *since;
++
++	if (!idle)
++		return;
++
++	since = bpf_map_lookup_elem(&idle_since, &zero);
++	if (since && scx_bpf_dsq_nr_queued(SCX_DSQ_LOCAL_ON | cpu) > 0) {
++		*since = bpf_ktime_get_ns();
++		__sync_fetch_and_add(&nr_idle_queued, 1);
++	}
++}
++
++void BPF_STRUCT_OPS(enq_last_exiting_running, struct task_struct *p)
++{
++	u32 zero = 0;
++	u64 *since, dur;
++
++	since = bpf_map_lookup_elem(&idle_since, &zero);
++	if (!since || !*since)
++		return;
++
++	dur = bpf_ktime_get_ns() - *since;
++	*since = 0;
++	if (dur > max_idle_queued_ns)
++		max_idle_queued_ns = dur;
++}
++
++void BPF_STRUCT_OPS(enq_last_exiting_exit, struct scx_exit_info *ei)
++{
++	UEI_RECORD(uei, ei);
++}
++
++SEC(".struct_ops.link")
++struct sched_ext_ops enq_last_exiting_ops = {
++	.enqueue		= (void *)enq_last_exiting_enqueue,
++	.update_idle		= (void *)enq_last_exiting_update_idle,
++	.running		= (void *)enq_last_exiting_running,
++	.exit			= (void *)enq_last_exiting_exit,
++	.flags			= SCX_OPS_ENQ_LAST | SCX_OPS_KEEP_BUILTIN_IDLE,
++	.timeout_ms		= 5000U,
++	.name			= "enq_last_exiting",
++};
+diff --git a/tools/testing/selftests/sched_ext/enq_last_exiting.c b/tools/testing/selftests/sched_ext/enq_last_exiting.c
+new file mode 100644
+index 000000000000..df5fce4356cf
+--- /dev/null
++++ b/tools/testing/selftests/sched_ext/enq_last_exiting.c
+@@ -0,0 +1,170 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <bpf/bpf.h>
++#include <sched.h>
++#include <stdio.h>
++#include <sys/mman.h>
++#include <sys/wait.h>
++#include <time.h>
++#include <unistd.h>
++#include <scx/common.h>
++#include "enq_last_exiting.bpf.skel.h"
++#include "scx_test.h"
++
++#define NR_EXITS	20
++#define EXIT_BYTES	(256UL << 20)
++
++/*
++ * A CPU that goes idle with a task left on its local DSQ is rescheduled right
++ * away, in well under a millisecond even under KASAN. A stranded task waits
++ * for an unrelated wakeup instead, from milliseconds to seconds.
++ */
++#define MAX_IDLE_QUEUED_NS	(1000ULL * 1000)
++
++static enum scx_test_status setup(void **ctx)
++{
++	struct enq_last_exiting *skel;
++
++	skel = enq_last_exiting__open();
++	SCX_FAIL_IF(!skel, "Failed to open");
++	SCX_ENUM_INIT(skel);
++	SCX_FAIL_IF(enq_last_exiting__load(skel), "Failed to load skel");
++
++	*ctx = skel;
++
++	return SCX_TEST_PASS;
++}
++
++/* Fault in a large buffer so that tearing it down outlasts the slice */
++static void exit_child(int cpu)
++{
++	cpu_set_t mask;
++	size_t off;
++	char *buf;
++
++	CPU_ZERO(&mask);
++	CPU_SET(cpu, &mask);
++	if (sched_setaffinity(0, sizeof(mask), &mask))
++		_exit(1);
++
++	buf = mmap(NULL, EXIT_BYTES, PROT_READ | PROT_WRITE,
++		   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++	if (buf == MAP_FAILED)
++		_exit(1);
++	/* 4K pages take longer to free than THPs */
++	madvise(buf, EXIT_BYTES, MADV_NOHUGEPAGE);
++	/* volatile, or the compiler drops the stores as nothing reads them */
++	for (off = 0; off < EXIT_BYTES; off += 4096)
++		((volatile char *)buf)[off] = 1;
++	_exit(0);
++}
++
++static long read_skip_exiting(void)
++{
++	char line[128];
++	long val = -1;
++	FILE *f;
++
++	f = fopen("/sys/kernel/sched_ext/root/events", "r");
++	if (!f)
++		return -1;
++	while (fgets(line, sizeof(line), f))
++		if (sscanf(line, "SCX_EV_ENQ_SKIP_EXITING %ld", &val) == 1)
++			break;
++	fclose(f);
++
++	return val;
++}
++
++static double now_ms(void)
++{
++	struct timespec ts;
++
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
++}
++
++static enum scx_test_status run(void *ctx)
++{
++	struct enq_last_exiting *skel = ctx;
++	enum scx_test_status status = SCX_TEST_FAIL;
++	double start, ms, max_ms = 0;
++	int i, cpu, wstatus;
++	struct bpf_link *link;
++	cpu_set_t mask;
++	long skipped;
++	pid_t pid;
++
++	SCX_FAIL_IF(sched_getaffinity(0, sizeof(mask), &mask),
++		    "Failed to get affinity");
++	/* the highest allowed CPU, which the runner is least likely to be on */
++	for (cpu = CPU_SETSIZE - 1; cpu >= 0; cpu--)
++		if (CPU_ISSET(cpu, &mask))
++			break;
++	SCX_FAIL_IF(cpu < 0, "No allowed CPU");
++
++	link = bpf_map__attach_struct_ops(skel->maps.enq_last_exiting_ops);
++	SCX_FAIL_IF(!link, "Failed to attach scheduler");
++
++	for (i = 0; i < NR_EXITS; i++) {
++		start = now_ms();
++		pid = fork();
++		if (pid < 0) {
++			SCX_ERR("Failed to fork");
++			goto out;
++		}
++		if (!pid)
++			exit_child(cpu);
++		if (waitpid(pid, &wstatus, 0) != pid || !WIFEXITED(wstatus) ||
++		    WEXITSTATUS(wstatus)) {
++			SCX_ERR("Child %d failed", i);
++			goto out;
++		}
++		ms = now_ms() - start;
++		if (ms > max_ms)
++			max_ms = ms;
++
++		if (UEI_EXITED(skel, uei)) {
++			SCX_ERR("Scheduler exited after %d exits (%.0fms): %s",
++				i + 1, ms, skel->data->uei.msg);
++			goto out;
++		}
++	}
++
++	skipped = read_skip_exiting();
++	fprintf(stderr, "exit %.0fms skip %ld idle-queued %llu/%.3fms\n",
++		max_ms, skipped, (unsigned long long)skel->bss->nr_idle_queued,
++		skel->bss->max_idle_queued_ns / 1e6);
++	if (skipped <= 0) {
++		fprintf(stderr, "SKIP: no exiting task bypassed ops.enqueue()\n");
++		status = SCX_TEST_SKIP;
++		goto out;
++	}
++
++	if (skel->bss->max_idle_queued_ns > MAX_IDLE_QUEUED_NS) {
++		SCX_ERR("CPU %d idled for %.3fms with a task on its local DSQ",
++			cpu, skel->bss->max_idle_queued_ns / 1e6);
++		goto out;
++	}
++
++	status = SCX_TEST_PASS;
++out:
++	bpf_link__destroy(link);
++
++	return status;
++}
++
++static void cleanup(void *ctx)
++{
++	struct enq_last_exiting *skel = ctx;
++
++	enq_last_exiting__destroy(skel);
++}
++
++struct scx_test enq_last_exiting = {
++	.name		= "enq_last_exiting",
++	.description	= "Verify an exiting task stranded by SCX_ENQ_LAST runs",
++	.setup		= setup,
++	.run		= run,
++	.cleanup	= cleanup,
++};
++REGISTER_SCX_TEST(&enq_last_exiting)
+
+base-commit: bbd3a328803509e8639fb7bb87b9e29a68422712
+-- 
+2.56.0
+
