@@ -1,4 +1,4 @@
-From 7c7ff2cc0d25bd92beb08315aebb533e70232c7e Mon Sep 17 00:00:00 2001
+From be25a0e55149b1b665d7a73440701466b805e8b4 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 15:38:48 +0000
 Subject: [PATCH sched_ext/for-7.5 6/7] selftests/sched_ext: Fix link leaks in
@@ -25,7 +25,6 @@ before attaching.
 
 Fixes: bb905626a48c ("selftests/sched_ext: Add SCX_ASSERT_ALIVE and adopt it")
 Fixes: 0aeb67fee3ca ("selftests/sched_ext: Fail loudly when EXIT_KIND is missing from BTF")
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  .../testing/selftests/sched_ext/create_dsq.c  | 38 ++++--------------
@@ -34,7 +33,7 @@ Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
  3 files changed, 26 insertions(+), 55 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/create_dsq.c b/tools/testing/selftests/sched_ext/create_dsq.c
-index 84143d5710f4..e8ea58dea08c 100644
+index 84143d5710f4..427df829daf8 100644
 --- a/tools/testing/selftests/sched_ext/create_dsq.c
 +++ b/tools/testing/selftests/sched_ext/create_dsq.c
 @@ -10,47 +10,23 @@
@@ -54,7 +53,7 @@ index 84143d5710f4..e8ea58dea08c 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(create_dsq);
++SCX_TEST_DEFINE_CTX(create_dsq)
  
  static enum scx_test_status run(void *ctx)
  {

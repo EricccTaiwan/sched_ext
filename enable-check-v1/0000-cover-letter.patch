@@ -1,6 +1,6 @@
-From 8feb6782f1a8db2f169d0d8eb9b27f7a7f6a2dd2 Mon Sep 17 00:00:00 2001
+From b5683dd840f08d0b39e30ef9e8f1cf790766f015 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
-Date: Fri, 23 Oct 2026 18:12:10 +0000
+Date: Sat, 24 Oct 2026 18:19:30 +0800
 Subject: [PATCH sched_ext/for-7.5 0/2] selftests/sched_ext: Catch schedulers that fail to enable
 To: Tejun Heo <tj@kernel.org>
 Cc: David Vernet <void@manifault.com>,
@@ -51,13 +51,13 @@ Cheng-Yang Chou (2):
  8 files changed, 65 insertions(+), 39 deletions(-)
 
 
-base-commit: bbd3a328803509e8639fb7bb87b9e29a68422712
-prerequisite-patch-id: f916191c98af8f132032e5ce2754379ee221aa3a
-prerequisite-patch-id: cd77ec7f1351564bdbe8daa93175e60bfedef5e3
+base-commit: dd3b1d9be27c82e136db727ddd5d67e46ef86428
+prerequisite-patch-id: 96f96bd0bad2b3839ce54b6a811b16d7cbd015e0
+prerequisite-patch-id: a68592aa486f1f611fcb9c2fd536815f1d9c22b9
 prerequisite-patch-id: 9cfcfaa70c635ea287a6f4abb14c03974384f02b
 prerequisite-patch-id: acc8541f28b2d5dfe656b2ce627eb233d46ed9b4
 prerequisite-patch-id: e17bf7e5b3bafe718f0f2ecf4929d0611b761f1d
-prerequisite-patch-id: ba9251e8902b2820b754892e2444b32ce7ce6f2a
+prerequisite-patch-id: 9ff98d5d15dcebf043a79f9195c4bc44dd8c8898
 prerequisite-patch-id: 00a64c3ca8c15349ffeefba2281cf15206755db0
 -- 
 2.56.0

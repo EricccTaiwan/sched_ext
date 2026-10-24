@@ -1,4 +1,4 @@
-From 8fc694069f5db262c31ba54bf58a8c30187c4705 Mon Sep 17 00:00:00 2001
+From 231271a8f04feb39a12081de1bff7b44bc870b4f Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:07 +0000
 Subject: [PATCH sched_ext/for-7.5 3/7] selftests/sched_ext: Fix scheduler
@@ -23,12 +23,12 @@ did, and let the wait loops reap every child before reporting.
 exit resolves the exit kind before opening its skeleton, as EXIT_KIND()
 returns on failure. hotplug also calls UEI_REPORT(), which prints to
 stderr, only once.
+
 init_enable_count waits for its pre-forked children to exit while SIGCHLD
 is still ignored, so that none of them is left as a zombie.
 
 Fixes: a5db7817af78 ("sched_ext: Add selftests")
 Fixes: 658ad2259b3e ("selftests/sched_ext: Add test to validate ops.dequeue() semantics")
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/dequeue.c   |  31 +++-

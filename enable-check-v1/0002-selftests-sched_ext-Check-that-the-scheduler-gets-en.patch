@@ -1,4 +1,4 @@
-From 8feb6782f1a8db2f169d0d8eb9b27f7a7f6a2dd2 Mon Sep 17 00:00:00 2001
+From b5683dd840f08d0b39e30ef9e8f1cf790766f015 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 17:48:09 +0000
 Subject: [PATCH sched_ext/for-7.5 2/2] selftests/sched_ext: Check that the
@@ -36,7 +36,6 @@ reload_loop is left alone: it attaches and detaches from two threads,
 so the state it would read is not stable, and maximal already checks
 the same scheduler with SCX_ASSERT_ALIVE().
 
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/minimal.c   | 33 +++----------------
@@ -46,7 +45,7 @@ Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
  4 files changed, 31 insertions(+), 29 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/minimal.c b/tools/testing/selftests/sched_ext/minimal.c
-index 89f7261757ff..e416e58ffbb6 100644
+index 89f7261757ff..d400c9eac47c 100644
 --- a/tools/testing/selftests/sched_ext/minimal.c
 +++ b/tools/testing/selftests/sched_ext/minimal.c
 @@ -11,43 +11,18 @@
@@ -66,7 +65,7 @@ index 89f7261757ff..e416e58ffbb6 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(minimal);
++SCX_TEST_DEFINE_CTX(minimal)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -98,7 +97,7 @@ index 89f7261757ff..e416e58ffbb6 100644
  	.name = "minimal",
  	.description = "Verify we can load a fully minimal scheduler",
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dfl.c b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
-index 6565c62bbcbc..18e619f7f781 100644
+index b925226eb842..af4c52e749ea 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dfl.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
 @@ -23,6 +23,7 @@ static enum scx_test_status run(void *ctx)
@@ -119,7 +118,7 @@ index 6565c62bbcbc..18e619f7f781 100644
  
  	return SCX_TEST_PASS;
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
-index 16770f482fd8..1e8477e61797 100644
+index 71c592b40d8b..2556a0d876db 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
 @@ -22,6 +22,7 @@ static enum scx_test_status run(void *ctx)

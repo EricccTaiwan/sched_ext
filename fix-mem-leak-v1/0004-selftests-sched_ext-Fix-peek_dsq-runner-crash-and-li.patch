@@ -1,4 +1,4 @@
-From 26d19f77bba30bcfdf3153c6d39ab625d742182c Mon Sep 17 00:00:00 2001
+From 47eb64d38db78db59b505be2b9067c8d3d2b7fd3 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 05:04:25 +0000
 Subject: [PATCH sched_ext/for-7.5 4/7] selftests/sched_ext: Fix peek_dsq
@@ -24,7 +24,6 @@ Also read the exit kind, destroy the link and only then check it, so a
 failing SCX_EXIT_NONE check no longer leaves the scheduler loaded.
 
 Fixes: 5aff3b319997 ("sched_ext: Add a selftest for scx_bpf_dsq_peek")
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/peek_dsq.c | 15 +++++----------

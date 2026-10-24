@@ -1,16 +1,12 @@
-From 8b37ce64275cd265e851e12b6450c39e9948d7ce Mon Sep 17 00:00:00 2001
+From 62bf0691dbfbace633d46e2bda361652bfd769c1 Mon Sep 17 00:00:00 2001
 In-Reply-To: <2026102109-rejoice-reboot-d810@gregkh>
 References: <2026102109-rejoice-reboot-d810@gregkh>
 From: Kuba Piecuch <jpiecuch@google.com>
 Date: Mon, 12 Oct 2026 21:07:46 +0000
 Subject: [PATCH 7.2.y] sched_ext: Wait for SCX_OPSS_DISPATCHING before moving
  tasks off DSQs
-To: stable@vger.kernel.org
-Cc: Kuba Piecuch <jpiecuch@google.com>,
-    Tejun Heo <tj@kernel.org>,
-    Andrea Righi <arighi@nvidia.com>
-
-[ Upstream commit 2935062be77113c1c4565ca9d0c72180449aafee ]
+To: <stable@vger.kernel.org>
+Cc: Ching-Chun Huang <jserv@ccns.ncku.edu.tw>
 
 A task can be found on a non-local DSQ while the CPU which dispatched it
 is still running ops.dequeue() and hasn't cleared SCX_OPSS_DISPATCHING.
@@ -29,12 +25,12 @@ Reviewed-by: Andrea Righi <arighi@nvidia.com>
 Assisted-by: Claude:claude-opus-5.5
 Signed-off-by: Kuba Piecuch <jpiecuch@google.com>
 Signed-off-by: Tejun Heo <tj@kernel.org>
+(cherry picked from commit 2935062be77113c1c4565ca9d0c72180449aafee)
 [ Inlined scx_wait_dispatching(), which 7.2.y doesn't have, into
   move_local_task_to_local_dsq(), unlink_dsq_and_lock_src_rq() and
   move_task_between_dsqs(), as was done for the reenqueue paths in
   7.2.y. 7.2.y has no scx_resolve_local_dsq(), so
   move_local_task_to_local_dsq() waits before linking the task. ]
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  kernel/sched/ext/ext.c | 14 ++++++++++++--

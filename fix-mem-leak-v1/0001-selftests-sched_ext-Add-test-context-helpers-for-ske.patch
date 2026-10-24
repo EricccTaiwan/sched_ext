@@ -1,4 +1,4 @@
-From 1b0e7b4f09b9860ea4b2961599efc5eedd4b98a6 Mon Sep 17 00:00:00 2001
+From d087e5706bbd904a290e36230f47496247813b90 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
 Subject: [PATCH sched_ext/for-7.5 1/7] selftests/sched_ext: Add test context
@@ -22,14 +22,13 @@ cleanup() tears down, as commit e18002d2c791 ("selftests/sched_ext:
 Fix select_cpu_dfl link leak on early return") did for one test. The
 next patch converts the affected tests.
 
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/scx_test.h | 88 ++++++++++++++++++++
  1 file changed, 88 insertions(+)
 
 diff --git a/tools/testing/selftests/sched_ext/scx_test.h b/tools/testing/selftests/sched_ext/scx_test.h
-index 8490b01fff74..9bb364b391f1 100644
+index 8490b01fff74..dfcf47c91c53 100644
 --- a/tools/testing/selftests/sched_ext/scx_test.h
 +++ b/tools/testing/selftests/sched_ext/scx_test.h
 @@ -9,6 +9,7 @@
@@ -49,7 +48,7 @@ index 8490b01fff74..9bb364b391f1 100644
 + * both however run() returns, so a failing SCX_*() check cannot leave the
 + * scheduler loaded for the tests that follow:
 + *
-+ *	SCX_TEST_DEFINE_CTX(foo);
++ *	SCX_TEST_DEFINE_CTX(foo)
 + *
 + *	static enum scx_test_status run(void *ctx)
 + *	{

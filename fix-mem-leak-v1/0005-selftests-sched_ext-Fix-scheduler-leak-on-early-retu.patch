@@ -1,4 +1,4 @@
-From a3f1a6824fde0cf5d8e581a4c43ca5fc8719fa85 Mon Sep 17 00:00:00 2001
+From 16bf1828805e5f3a8718d3f7759ad409133403b6 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 25 Sep 2026 04:11:35 +0000
 Subject: [PATCH sched_ext/for-7.5 5/7] selftests/sched_ext: Fix scheduler leak
@@ -21,7 +21,6 @@ Make those failures go through a teardown label, and reap every forked
 child before reporting.
 
 Fixes: d781d1b78acf ("selftests/sched_ext: Check the cmask cid-form ops.enable() receives")
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  .../selftests/sched_ext/enable_cmask.c        | 67 ++++++++++++++-----

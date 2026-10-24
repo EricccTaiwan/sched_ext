@@ -1,4 +1,4 @@
-From 3c0869e480b2483123c4140c7b14c1454e969415 Mon Sep 17 00:00:00 2001
+From dad6a9b6ecbd22f531098dbdfabeb62972b15392 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Sat, 26 Sep 2026 20:04:47 +0000
 Subject: [PATCH sched_ext/for-7.5 7/7] selftests/sched_ext: Fail tests that
@@ -22,7 +22,6 @@ left a scheduler loaded, naming it. Unregistering a scheduler waits for
 it to be disabled, so the state is final once the test returns. Tests
 that start with a scheduler already loaded are not checked.
 
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/runner.c | 39 +++++++++++++++++-----

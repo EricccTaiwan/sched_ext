@@ -1,4 +1,4 @@
-From 1dfa847e87ecddb673a1854f156c9b6c7716f1d2 Mon Sep 17 00:00:00 2001
+From b8b9ff897986311f6d2e5ad591124f659a430cd7 Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Fri, 23 Oct 2026 17:48:09 +0000
 Subject: [PATCH sched_ext/for-7.5 1/2] selftests/sched_ext: Add
@@ -29,7 +29,6 @@ still alive.
 Move the state read into scx_sched_state() in util.c so that the runner's
 check for a leftover scheduler shares it.
 
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  tools/testing/selftests/sched_ext/runner.c   | 13 +++----------
@@ -64,7 +63,7 @@ index 9b90ac0fc7b3..92f4e1d51a64 100644
  
  static enum scx_test_status run_test(const struct scx_test *test)
 diff --git a/tools/testing/selftests/sched_ext/scx_test.h b/tools/testing/selftests/sched_ext/scx_test.h
-index 9bb364b391f1..d678fa322832 100644
+index dfcf47c91c53..2b19977e6291 100644
 --- a/tools/testing/selftests/sched_ext/scx_test.h
 +++ b/tools/testing/selftests/sched_ext/scx_test.h
 @@ -10,8 +10,10 @@

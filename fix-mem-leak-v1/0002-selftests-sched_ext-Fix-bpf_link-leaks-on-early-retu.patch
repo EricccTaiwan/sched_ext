@@ -1,4 +1,4 @@
-From 9d29b73401dca330d083c8cc9b40c5d17fa75cc1 Mon Sep 17 00:00:00 2001
+From 2bc6eebd8f82d5efe6e74e100e2881752a9913fa Mon Sep 17 00:00:00 2001
 From: Cheng-Yang Chou <yphbchou0911@gmail.com>
 Date: Thu, 24 Sep 2026 20:59:08 +0000
 Subject: [PATCH sched_ext/for-7.5 2/7] selftests/sched_ext: Fix bpf_link leaks
@@ -26,7 +26,6 @@ Fixes: a5db7817af78 ("sched_ext: Add selftests")
 Fixes: 36adf6fe6cbe ("selftests/sched_ext: Update test enq_select_cpu_fails")
 Fixes: 5ae5161820e5 ("selftests/sched_ext: Add NUMA-aware scheduler test")
 Fixes: c31f2ee5cd7d ("sched_ext: Fix enq_last_no_enq_fails selftest")
-Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
 ---
  .../selftests/sched_ext/ddsp_bogus_dsq_fail.c | 30 ++---------
@@ -43,7 +42,7 @@ Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
  11 files changed, 76 insertions(+), 318 deletions(-)
 
 diff --git a/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c b/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c
-index b6d13496b24e..d1bec68046c4 100644
+index b6d13496b24e..0631e634b1e9 100644
 --- a/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c
 +++ b/tools/testing/selftests/sched_ext/ddsp_bogus_dsq_fail.c
 @@ -11,43 +11,21 @@
@@ -63,7 +62,7 @@ index b6d13496b24e..d1bec68046c4 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(ddsp_bogus_dsq_fail);
++SCX_TEST_DEFINE_CTX(ddsp_bogus_dsq_fail)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -95,7 +94,7 @@ index b6d13496b24e..d1bec68046c4 100644
  	.name = "ddsp_bogus_dsq_fail",
  	.description = "Verify we gracefully fail, and fall back to using a "
 diff --git a/tools/testing/selftests/sched_ext/ddsp_vtimelocal_fail.c b/tools/testing/selftests/sched_ext/ddsp_vtimelocal_fail.c
-index af9ce4ee8baa..a134065b08ba 100644
+index af9ce4ee8baa..635c023617bd 100644
 --- a/tools/testing/selftests/sched_ext/ddsp_vtimelocal_fail.c
 +++ b/tools/testing/selftests/sched_ext/ddsp_vtimelocal_fail.c
 @@ -10,43 +10,21 @@
@@ -115,7 +114,7 @@ index af9ce4ee8baa..a134065b08ba 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(ddsp_vtimelocal_fail);
++SCX_TEST_DEFINE_CTX(ddsp_vtimelocal_fail)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -147,7 +146,7 @@ index af9ce4ee8baa..a134065b08ba 100644
  	.name = "ddsp_vtimelocal_fail",
  	.description = "Verify we gracefully fail, and fall back to using a "
 diff --git a/tools/testing/selftests/sched_ext/enq_last_no_enq_fails.c b/tools/testing/selftests/sched_ext/enq_last_no_enq_fails.c
-index d3387ae03679..2deb8e222c81 100644
+index d3387ae03679..d5446ccc8ef8 100644
 --- a/tools/testing/selftests/sched_ext/enq_last_no_enq_fails.c
 +++ b/tools/testing/selftests/sched_ext/enq_last_no_enq_fails.c
 @@ -11,47 +11,18 @@
@@ -167,7 +166,7 @@ index d3387ae03679..2deb8e222c81 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(enq_last_no_enq_fails);
++SCX_TEST_DEFINE_CTX(enq_last_no_enq_fails)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -203,7 +202,7 @@ index d3387ae03679..2deb8e222c81 100644
  	.name = "enq_last_no_enq_fails",
  	.description = "Verify we eject a scheduler if we specify "
 diff --git a/tools/testing/selftests/sched_ext/enq_select_cpu.c b/tools/testing/selftests/sched_ext/enq_select_cpu.c
-index 340c6f8b86da..65b5f64d813e 100644
+index 340c6f8b86da..04cd2ec9139e 100644
 --- a/tools/testing/selftests/sched_ext/enq_select_cpu.c
 +++ b/tools/testing/selftests/sched_ext/enq_select_cpu.c
 @@ -11,19 +11,7 @@
@@ -223,7 +222,7 @@ index 340c6f8b86da..65b5f64d813e 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(enq_select_cpu);
++SCX_TEST_DEFINE_CTX(enq_select_cpu)
  
  static int test_select_cpu_from_user(const struct enq_select_cpu *skel)
  {
@@ -329,7 +328,7 @@ index b060c3b65c82..0ce462ffa1f1 100644
  	.name = "numa",
  	.description = "Verify NUMA-aware functionalities",
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dfl.c b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
-index 7e342c0cec65..6565c62bbcbc 100644
+index 7e342c0cec65..b925226eb842 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dfl.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dfl.c
 @@ -14,44 +14,15 @@
@@ -365,7 +364,7 @@ index 7e342c0cec65..6565c62bbcbc 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(select_cpu_dfl);
++SCX_TEST_DEFINE_CTX(select_cpu_dfl)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -415,7 +414,7 @@ index 7e342c0cec65..6565c62bbcbc 100644
  	.name = "select_cpu_dfl",
  	.description = "Verify the default ops.select_cpu() dispatches tasks "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c b/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c
-index 9b5d232efb7f..21d400b34292 100644
+index 9b5d232efb7f..f646e5ea6c48 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dfl_nodispatch.c
 @@ -13,29 +13,15 @@
@@ -435,7 +434,7 @@ index 9b5d232efb7f..21d400b34292 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(select_cpu_dfl_nodispatch);
++SCX_TEST_DEFINE_CTX(select_cpu_dfl_nodispatch)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -491,7 +490,7 @@ index 9b5d232efb7f..21d400b34292 100644
  	.name = "select_cpu_dfl_nodispatch",
  	.description = "Verify behavior of scx_bpf_select_cpu_dfl() in "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
-index 80283dbc41b7..16770f482fd8 100644
+index 80283dbc41b7..71c592b40d8b 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dispatch.c
 @@ -13,29 +13,15 @@
@@ -511,7 +510,7 @@ index 80283dbc41b7..16770f482fd8 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(select_cpu_dispatch);
++SCX_TEST_DEFINE_CTX(select_cpu_dispatch)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -564,7 +563,7 @@ index 80283dbc41b7..16770f482fd8 100644
  	.name = "select_cpu_dispatch",
  	.description = "Test direct dispatching to built-in DSQs from "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dispatch_bad_dsq.c b/tools/testing/selftests/sched_ext/select_cpu_dispatch_bad_dsq.c
-index 5e72ebbc90a5..c393d4ab3ebb 100644
+index 5e72ebbc90a5..18f11b3978d4 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dispatch_bad_dsq.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dispatch_bad_dsq.c
 @@ -11,43 +11,21 @@
@@ -584,7 +583,7 @@ index 5e72ebbc90a5..c393d4ab3ebb 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(select_cpu_dispatch_bad_dsq);
++SCX_TEST_DEFINE_CTX(select_cpu_dispatch_bad_dsq)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -616,7 +615,7 @@ index 5e72ebbc90a5..c393d4ab3ebb 100644
  	.name = "select_cpu_dispatch_bad_dsq",
  	.description = "Verify graceful failure if we direct-dispatch to a "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_dispatch_dbl_dsp.c b/tools/testing/selftests/sched_ext/select_cpu_dispatch_dbl_dsp.c
-index aa85949478bc..bf850d6381a3 100644
+index aa85949478bc..0cd17f2c91cf 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_dispatch_dbl_dsp.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_dispatch_dbl_dsp.c
 @@ -11,43 +11,21 @@
@@ -636,7 +635,7 @@ index aa85949478bc..bf850d6381a3 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(select_cpu_dispatch_dbl_dsp);
++SCX_TEST_DEFINE_CTX(select_cpu_dispatch_dbl_dsp)
  
  static enum scx_test_status run(void *ctx)
  {
@@ -668,7 +667,7 @@ index aa85949478bc..bf850d6381a3 100644
  	.name = "select_cpu_dispatch_dbl_dsp",
  	.description = "Verify graceful failure if we dispatch twice to a "
 diff --git a/tools/testing/selftests/sched_ext/select_cpu_vtime.c b/tools/testing/selftests/sched_ext/select_cpu_vtime.c
-index 1e9b5c9bfff1..475b58ab64bb 100644
+index 1e9b5c9bfff1..a209bff84505 100644
 --- a/tools/testing/selftests/sched_ext/select_cpu_vtime.c
 +++ b/tools/testing/selftests/sched_ext/select_cpu_vtime.c
 @@ -11,46 +11,23 @@
@@ -688,7 +687,7 @@ index 1e9b5c9bfff1..475b58ab64bb 100644
 -
 -	return SCX_TEST_PASS;
 -}
-+SCX_TEST_DEFINE_CTX(select_cpu_vtime);
++SCX_TEST_DEFINE_CTX(select_cpu_vtime)
  
  static enum scx_test_status run(void *ctx)
  {
