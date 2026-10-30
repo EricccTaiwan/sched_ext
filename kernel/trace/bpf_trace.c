@@ -867,14 +867,11 @@ static int bpf_send_signal_common(u32 sig, enum pid_type type, struct task_struc
 		siginfo = &info;
 	}
 
-	/* Similar to bpf_probe_write_user, task needs to be
-	 * in a sound condition and kernel memory access be
-	 * permitted in order to send signal to the current
-	 * task.
+	/*
+	 * Similar to bpf_probe_write_user, task needs to be
+	 * in a sound condition.
 	 */
 	if (unlikely(task->flags & (PF_KTHREAD | PF_EXITING)))
-		return -EPERM;
-	if (unlikely(!nmi_uaccess_okay()))
 		return -EPERM;
 	/* Task should not be pid=1 to avoid kernel panic. */
 	if (unlikely(is_global_init(task)))
@@ -2404,7 +2401,7 @@ static int copy_user_syms(struct user_syms *us, unsigned long __user *usyms, u32
 		goto error;
 
 	for (p = buf, i = 0; i < cnt; i++) {
-		if (__get_user(usymbol, usyms + i)) {
+		if (get_user(usymbol, usyms + i)) {
 			err = -EFAULT;
 			goto error;
 		}
@@ -3311,8 +3308,8 @@ int bpf_uprobe_multi_link_attach(const union bpf_attr *attr, struct bpf_prog *pr
 
 	/*
 	 * All uoffsets/uref_ctr_offsets/ucookies arrays have the same value
-	 * size, we need to check their address range is safe for __get_user
-	 * calls.
+	 * size.  Check their address ranges up front, so that a bad pointer
+	 * fails before anything is looked up or allocated.
 	 */
 	size = sizeof(*uoffsets) * cnt;
 	if (!access_ok(uoffsets, size) || !access_ok(uref_ctr_offsets, size) ||
@@ -3347,7 +3344,7 @@ int bpf_uprobe_multi_link_attach(const union bpf_attr *attr, struct bpf_prog *pr
 		goto error_free;
 
 	for (i = 0; i < cnt; i++) {
-		if (__get_user(uprobes[i].offset, uoffsets + i)) {
+		if (get_user(uprobes[i].offset, uoffsets + i)) {
 			err = -EFAULT;
 			goto error_free;
 		}
@@ -3355,11 +3352,11 @@ int bpf_uprobe_multi_link_attach(const union bpf_attr *attr, struct bpf_prog *pr
 			err = -EINVAL;
 			goto error_free;
 		}
-		if (uref_ctr_offsets && __get_user(uprobes[i].ref_ctr_offset, uref_ctr_offsets + i)) {
+		if (uref_ctr_offsets && get_user(uprobes[i].ref_ctr_offset, uref_ctr_offsets + i)) {
 			err = -EFAULT;
 			goto error_free;
 		}
-		if (ucookies && __get_user(uprobes[i].cookie, ucookies + i)) {
+		if (ucookies && get_user(uprobes[i].cookie, ucookies + i)) {
 			err = -EFAULT;
 			goto error_free;
 		}
