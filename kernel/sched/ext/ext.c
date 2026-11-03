@@ -1771,6 +1771,23 @@ static void scx_resched_curr_lazy(struct rq *rq)
 	}
 }
 
+/*
+ * The ext_server keeps higher class tasks from starving the tasks queued on
+ * @rq. A dl_server pick that comes back empty stops it, and an ext pick can
+ * come back empty with tasks queued on @rq, e.g. while the BPF scheduler keeps
+ * them on a DSQ that @rq doesn't consume. Starting the server only on @rq's
+ * first enqueue would then leave them stuck behind a higher class task.
+ * Restart it whenever a task is queued on @rq or inserted into its local DSQ.
+ */
+static void ext_server_ensure_active(struct rq *rq)
+{
+	if (likely(dl_server_active(&rq->ext_server)))
+		return;
+	if (rq->clock_update_flags < RQCF_UPDATED)
+		update_rq_clock(rq);
+	dl_server_start(&rq->ext_server);
+}
+
 static void rq_owned_post_enq(struct scx_sched *sch, struct rq *rq,
 			      struct scx_dispatch_q *dsq, struct task_struct *p,
 			      u64 enq_flags)
@@ -1789,6 +1806,8 @@ static void rq_owned_post_enq(struct scx_sched *sch, struct rq *rq,
 			schedule_deferred_locked(rq);
 		return;
 	}
+
+	ext_server_ensure_active(rq);
 
 	/*
 	 * Note that @rq's lock may be dropped between this enqueue and @p
@@ -2498,9 +2517,7 @@ static void enqueue_task_scx(struct rq *rq, struct task_struct *p, int core_enq_
 	if (SCX_HAS_OP(sch, runnable) && !task_on_rq_migrating(p))
 		SCX_CALL_OP_TASK(sch, runnable, rq, p, enq_flags);
 
-	/* Start dl_server if this is the first task being enqueued */
-	if (rq->scx.nr_running == 1)
-		dl_server_start(&rq->ext_server);
+	ext_server_ensure_active(rq);
 
 	scx_do_enqueue_task(rq, p, enq_flags, sticky_cpu);
 out:
