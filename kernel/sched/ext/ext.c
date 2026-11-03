@@ -12167,8 +12167,10 @@ static const struct btf_kfunc_id_set scx_kfunc_set_any = {
  * when scx_locked_rq() returns NULL. Taking it while the context already holds
  * an rq lock, the same one or another cpu's, can deadlock.
  *
- * scx_bpf_destroy_dsq() takes a user DSQ lock. A tracing program can run while
- * that lock is already held and recursively acquire it.
+ * scx_bpf_destroy_dsq() and the DSQ iterator take a user DSQ lock. A tracing
+ * program can run while that lock is already held and recursively acquire it.
+ * Rejecting bpf_iter_scx_dsq_new() is enough as the iterator can't be used
+ * without it.
  *
  * Before returning, scx_bpf_sub_grant() and scx_bpf_sub_revoke() invoke
  * ops.sub_caps_updated() of the sub-schedulers whose caps changed, so those ops
@@ -12185,6 +12187,7 @@ BTF_ID_FLAGS(func, scx_bpf_cidperf_set, KF_IMPLICIT_ARGS)
 BTF_ID_FLAGS(func, scx_bpf_sub_grant, KF_IMPLICIT_ARGS)
 BTF_ID_FLAGS(func, scx_bpf_sub_revoke, KF_IMPLICIT_ARGS)
 BTF_ID_FLAGS(func, scx_bpf_destroy_dsq, KF_IMPLICIT_ARGS)
+BTF_ID_FLAGS(func, bpf_iter_scx_dsq_new, KF_IMPLICIT_ARGS | KF_ITER_NEW | KF_RCU_PROTECTED)
 BTF_KFUNCS_END(scx_kfunc_ids_no_tracing)
 
 /*
