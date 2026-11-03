@@ -197,6 +197,7 @@ auto-test-targets :=			\
 	select_cpu_dispatch_dbl_dsp	\
 	select_cpu_vtime		\
 	rt_stall			\
+	rt_stall_hold			\
 	test_example			\
 	total_bw			\
 	cyclic_kick_wait		\
