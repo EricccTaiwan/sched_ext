@@ -6894,7 +6894,11 @@ void sched_proxy_block_task(struct rq *rq, struct task_struct *p)
 	if (WARN_ON_ONCE(state == TASK_RUNNING))
 		return;
 
-	if (task_current_donor(rq, p))
+	/*
+	 * @p is also curr if it blocked in __schedule() and the pick dropped
+	 * the rq lock. There is no proxy to undo then.
+	 */
+	if (task_current_donor(rq, p) && !task_current(rq, p))
 		proxy_reset_donor(rq);
 
 	if (!p->se.sched_delayed)
