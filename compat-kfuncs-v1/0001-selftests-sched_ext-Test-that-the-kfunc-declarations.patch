@@ -1,0 +1,280 @@
+From a352bf4b64b9356499404d05d4d6e5aa1ec6da0a Mon Sep 17 00:00:00 2001
+From: Cheng-Yang Chou <yphbchou0911@gmail.com>
+Date: Wed, 18 Nov 2026 09:50:26 +0800
+Subject: [PATCH sched_ext/for-7.5 1/1] selftests/sched_ext: Test that the
+ kfunc declarations in the scx headers bind
+To: Tejun Heo <tj@kernel.org>
+Cc: David Vernet <void@manifault.com>,
+    Andrea Righi <arighi@nvidia.com>,
+    Changwoo Min <changwoo@igalia.com>,
+    Emil Tsalapatis <emil@etsalapatis.com>,
+    fangqiurong <fangqiurong@kylinos.cn>,
+    sched-ext@lists.linux.dev,
+    linux-kernel@vger.kernel.org
+
+A weak kfunc extern that libbpf can't bind stays NULL without an error,
+and the compat wrapper using it silently falls back to an older kfunc.
+Two such declarations went out in v7.1 and stayed unnoticed for two
+releases: scx_bpf_dsq_reenq___compat declared the implicit aux argument,
+and scx_bpf_dsq_move_to_local___v2 resolved to
+scx_bpf_dsq_move_to_local, as libbpf strips the last ___ suffix. They
+were fixed by:
+
+  commit 62f3d531e41a ("sched_ext: Fix scx_bpf_dsq_reenq___compat kfunc extern prototype")
+  commit 56bbc91219c0 ("sched_ext: Fix scx_bpf_dsq_move_to_local___v2 compat detection")
+
+Add a test that records which of the weak kfunc declarations in
+common.bpf.h, and of the newest variants in compat.bpf.h, libbpf bound.
+It fails if one didn't bind although the kernel has the function libbpf
+resolves it to. With either fix reverted, it fails with:
+
+  scx_bpf_dsq_reenq___compat didn't bind to scx_bpf_dsq_reenq
+  scx_bpf_dsq_move_to_local___v2 didn't bind to scx_bpf_dsq_move_to_local
+
+Signed-off-by: Cheng-Yang Chou <yphbchou0911@gmail.com>
+---
+ tools/testing/selftests/sched_ext/Makefile    |  1 +
+ .../selftests/sched_ext/compat_kfuncs.bpf.c   | 20 ++++
+ .../selftests/sched_ext/compat_kfuncs.c       | 97 +++++++++++++++++++
+ .../selftests/sched_ext/compat_kfuncs.h       | 86 ++++++++++++++++
+ 4 files changed, 204 insertions(+)
+ create mode 100644 tools/testing/selftests/sched_ext/compat_kfuncs.bpf.c
+ create mode 100644 tools/testing/selftests/sched_ext/compat_kfuncs.c
+ create mode 100644 tools/testing/selftests/sched_ext/compat_kfuncs.h
+
+diff --git a/tools/testing/selftests/sched_ext/Makefile b/tools/testing/selftests/sched_ext/Makefile
+index 44083f1c6596..1484582c5727 100644
+--- a/tools/testing/selftests/sched_ext/Makefile
++++ b/tools/testing/selftests/sched_ext/Makefile
+@@ -166,6 +166,7 @@ all_test_bpfprogs := $(foreach prog,$(wildcard *.bpf.c),$(INCLUDE_DIR)/$(patsubs
+ auto-test-targets :=			\
+ 	cgroup_nr_cpus			\
+ 	class_switch_stall		\
++	compat_kfuncs			\
+ 	create_dsq			\
+ 	dequeue				\
+ 	dequeue_iter			\
+diff --git a/tools/testing/selftests/sched_ext/compat_kfuncs.bpf.c b/tools/testing/selftests/sched_ext/compat_kfuncs.bpf.c
+new file mode 100644
+index 000000000000..85d376f89773
+--- /dev/null
++++ b/tools/testing/selftests/sched_ext/compat_kfuncs.bpf.c
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: GPL-2.0
++/* Record which of the kfuncs in compat_kfuncs.h libbpf bound. */
++
++#include <scx/common.bpf.h>
++#include "compat_kfuncs.h"
++
++char _license[] SEC("license") = "GPL";
++
++bool bound[NR_COMPAT_KFUNCS];
++
++SEC("syscall")
++int compat_kfuncs_check(void *ctx)
++{
++	int i = 0;
++
++#define RECORD(name)	bound[i++] = bpf_ksym_exists(name);
++	COMPAT_KFUNCS(RECORD)
++#undef RECORD
++	return 0;
++}
+diff --git a/tools/testing/selftests/sched_ext/compat_kfuncs.c b/tools/testing/selftests/sched_ext/compat_kfuncs.c
+new file mode 100644
+index 000000000000..2b5eff3e5856
+--- /dev/null
++++ b/tools/testing/selftests/sched_ext/compat_kfuncs.c
+@@ -0,0 +1,97 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Test that the kfunc declarations in the scx headers bind on this kernel.
++ *
++ * A weak kfunc extern binds to the kernel function named like it with the
++ * last ___<flavor> stripped, if their prototypes are compatible, and stays
++ * NULL otherwise. A wrong declaration therefore doesn't fail to load: the
++ * compat wrapper using it silently falls back to an older kfunc.
++ */
++#include <bpf/bpf.h>
++#include <bpf/btf.h>
++#include <scx/common.h>
++#include <stdio.h>
++#include <string.h>
++#include "compat_kfuncs.h"
++#include "compat_kfuncs.bpf.skel.h"
++#include "scx_test.h"
++
++#define COMPAT_KFUNC_NAME(name)	#name,
++static const char * const names[] = { COMPAT_KFUNCS(COMPAT_KFUNC_NAME) };
++
++/* libbpf's bpf_core_essential_name_len() */
++static size_t essential_name_len(const char *name)
++{
++	int i;
++
++	for (i = strlen(name) - 5; i >= 0; i--) {
++		if (name[i] != '_' && !strncmp(name + i + 1, "___", 3) &&
++		    name[i + 4] != '_')
++			return i + 1;
++	}
++	return strlen(name);
++}
++
++static enum scx_test_status setup(void **ctx)
++{
++	struct compat_kfuncs *skel;
++
++	skel = compat_kfuncs__open();
++	SCX_FAIL_IF(!skel, "Failed to open");
++	SCX_ENUM_INIT(skel);
++	SCX_FAIL_IF(compat_kfuncs__load(skel), "Failed to load skel");
++
++	*ctx = skel;
++
++	return SCX_TEST_PASS;
++}
++
++static enum scx_test_status run(void *ctx)
++{
++	struct compat_kfuncs *skel = ctx;
++	enum scx_test_status status = SCX_TEST_PASS;
++	struct btf *vmlinux_btf;
++	char target[128];
++	int prog_fd, i, err;
++
++	LIBBPF_OPTS(bpf_test_run_opts, topts);
++
++	prog_fd = bpf_program__fd(skel->progs.compat_kfuncs_check);
++	err = bpf_prog_test_run_opts(prog_fd, &topts);
++	SCX_FAIL_IF(err, "BPF_PROG_RUN failed (%d)", err);
++
++	vmlinux_btf = btf__load_vmlinux_btf();
++	SCX_FAIL_IF(!vmlinux_btf, "Failed to load vmlinux BTF");
++
++	for (i = 0; i < NR_COMPAT_KFUNCS; i++) {
++		snprintf(target, sizeof(target), "%.*s",
++			 (int)essential_name_len(names[i]), names[i]);
++
++		/* not built into this kernel, e.g. !CONFIG_EXT_SUB_SCHED */
++		if (btf__find_by_name_kind(vmlinux_btf, target,
++					   BTF_KIND_FUNC) < 0)
++			continue;
++
++		if (!skel->bss->bound[i]) {
++			SCX_ERR("%s didn't bind to %s", names[i], target);
++			status = SCX_TEST_FAIL;
++		}
++	}
++
++	btf__free(vmlinux_btf);
++	return status;
++}
++
++static void cleanup(void *ctx)
++{
++	compat_kfuncs__destroy(ctx);
++}
++
++struct scx_test compat_kfuncs = {
++	.name = "compat_kfuncs",
++	.description = "Verify that the scx header kfunc declarations bind",
++	.setup = setup,
++	.run = run,
++	.cleanup = cleanup,
++};
++REGISTER_SCX_TEST(&compat_kfuncs)
+diff --git a/tools/testing/selftests/sched_ext/compat_kfuncs.h b/tools/testing/selftests/sched_ext/compat_kfuncs.h
+new file mode 100644
+index 000000000000..6329717ed738
+--- /dev/null
++++ b/tools/testing/selftests/sched_ext/compat_kfuncs.h
+@@ -0,0 +1,86 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * The weak kfunc declarations in scx/common.bpf.h and the newest variant of
++ * each kfunc in scx/compat.bpf.h. Each of them must bind on a kernel that has
++ * the kfunc libbpf resolves it to. Older variants that the kernel has moved on
++ * from don't belong here.
++ */
++#ifndef __COMPAT_KFUNCS_H
++#define __COMPAT_KFUNCS_H
++
++#define COMPAT_KFUNCS(X)				\
++	/* scx/common.bpf.h */				\
++	X(__scx_bpf_select_cpu_and)			\
++	X(__scx_bpf_dsq_insert_vtime)			\
++	X(scx_bpf_dsq_peek)				\
++	X(bpf_iter_scx_dsq_new)				\
++	X(bpf_iter_scx_dsq_next)			\
++	X(bpf_iter_scx_dsq_destroy)			\
++	X(scx_bpf_dsq_reenq_task)			\
++	X(scx_bpf_exit_bstr)				\
++	X(scx_bpf_dump_bstr)				\
++	X(scx_bpf_cpuperf_cap)				\
++	X(scx_bpf_cpuperf_cur)				\
++	X(scx_bpf_cpuperf_set)				\
++	X(scx_bpf_nr_node_ids)				\
++	X(scx_bpf_nr_cpu_ids)				\
++	X(scx_bpf_cpu_node)				\
++	X(scx_bpf_get_possible_cpumask)			\
++	X(scx_bpf_get_online_cpumask)			\
++	X(scx_bpf_put_cpumask)				\
++	X(scx_bpf_get_idle_cpumask_node)		\
++	X(scx_bpf_get_idle_smtmask_node)		\
++	X(scx_bpf_pick_idle_cpu_node)			\
++	X(scx_bpf_pick_any_cpu_node)			\
++	X(scx_bpf_cpu_rq)				\
++	X(scx_bpf_cpu_curr)				\
++	X(scx_bpf_tid_to_task)				\
++	X(scx_bpf_now)					\
++	X(scx_bpf_events)				\
++	X(scx_bpf_cgroup_nr_cpus)			\
++	X(scx_bpf_cpu_to_cid)				\
++	X(scx_bpf_cid_to_cpu)				\
++	X(scx_bpf_cid_node)				\
++	X(scx_bpf_task_cid)				\
++	X(scx_bpf_this_cid)				\
++	X(scx_bpf_cid_curr)				\
++	X(scx_bpf_nr_cids)				\
++	X(scx_bpf_nr_online_cids)			\
++	X(scx_bpf_online_cmask)				\
++	X(scx_bpf_cidperf_cap)				\
++	X(scx_bpf_cidperf_cur)				\
++	X(scx_bpf_sub_grant)				\
++	X(scx_bpf_sub_revoke)				\
++	X(scx_bpf_sub_caps)				\
++	X(scx_bpf_sub_kill_bstr)			\
++	X(bpf_call_rcu)					\
++	X(bpf_local_irq_save)				\
++	X(bpf_local_irq_restore)			\
++	X(bpf_res_spin_lock)				\
++	X(bpf_res_spin_unlock)				\
++	/* scx/compat.bpf.h */				\
++	X(scx_bpf_task_cgroup___new)			\
++	X(scx_bpf_dsq_move_to_local___v2___compat)	\
++	X(scx_bpf_dsq_move_set_slice___new)		\
++	X(scx_bpf_dsq_move_set_vtime___new)		\
++	X(scx_bpf_dsq_move___new)			\
++	X(scx_bpf_dsq_move_vtime___new)			\
++	X(bpf_cpumask_populate)				\
++	X(scx_bpf_sub_dispatch___compat)		\
++	X(scx_bpf_cid_override___compat)		\
++	X(scx_bpf_kick_cid___v2)			\
++	X(scx_bpf_cid_topo___v2)			\
++	X(scx_bpf_cidperf_set___v2)			\
++	X(scx_bpf_select_cpu_and___compat)		\
++	X(scx_bpf_dsq_insert_vtime___compat)		\
++	X(scx_bpf_dsq_insert___v2___compat)		\
++	X(scx_bpf_task_set_slice___new)			\
++	X(scx_bpf_task_set_dsq_vtime___new)		\
++	X(scx_bpf_task_set_lazy_resched___new)		\
++	X(scx_bpf_dsq_reenq___compat)			\
++	X(scx_bpf_reenqueue_local___v2___compat)
++
++#define COMPAT_KFUNC_CNT(name)	+ 1
++enum { NR_COMPAT_KFUNCS = 0 COMPAT_KFUNCS(COMPAT_KFUNC_CNT) };
++
++#endif /* __COMPAT_KFUNCS_H */
+-- 
+2.56.0
+
