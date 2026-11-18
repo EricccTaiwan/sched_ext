@@ -5150,8 +5150,13 @@ int scx_check_setscheduler(struct task_struct *p, int policy)
 {
 	lockdep_assert_rq_held(task_rq(p));
 
-	/* If disallow, reject transitioning into SCX. */
-	if (scx_enabled() && READ_ONCE(p->scx.disallow) &&
+	/*
+	 * If disallow, reject transitioning into SCX. ops.init_task() sets
+	 * disallow while the scheduler is still loading, so don't wait for
+	 * scx_enabled(). A flag left over from an unloaded scheduler doesn't
+	 * count.
+	 */
+	if (scx_enable_state() != SCX_DISABLED && READ_ONCE(p->scx.disallow) &&
 	    p->policy != policy && policy == SCHED_EXT)
 		return -EACCES;
 
@@ -7669,6 +7674,8 @@ static void scx_root_disable(struct scx_sched *sch)
 		}
 
 		scx_disable_and_exit_task(scx_task_sched(p), p);
+		/* see scx_check_setscheduler() */
+		WRITE_ONCE(p->scx.disallow, false);
 	}
 	scx_task_iter_stop(&sti);
 
