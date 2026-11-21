@@ -4642,6 +4642,8 @@ static struct cgroup *tg_cgrp(struct task_group *tg)
 int __scx_init_task(struct scx_sched *sch, struct task_struct *p,
 		    struct cgroup *cgrp, bool fork)
 {
+	struct rq *rq;
+	struct rq_flags rf;
 	int ret;
 
 	p->scx.disallow = false;
@@ -4659,41 +4661,50 @@ int __scx_init_task(struct scx_sched *sch, struct task_struct *p,
 		}
 	}
 
-	if (p->scx.disallow) {
-		if (unlikely(scx_parent(sch))) {
-			scx_error(sch, "non-root ops.init_task() set task->scx.disallow for %s[%d]",
-				  p->comm, p->pid);
-		} else if (unlikely(fork)) {
+	/*
+	 * A scheduler can be loaded as root or sub-sched, but only root decides
+	 * whether @p may switch to %SCHED_EXT. Ignore a sub-sched's
+	 * @p->scx.disallow.
+	 */
+	if (scx_parent(sch))
+		return 0;
+
+	if (fork) {
+		if (unlikely(p->scx.disallow))
 			scx_error(sch, "ops.init_task() set task->scx.disallow for %s[%d] during fork",
 				  p->comm, p->pid);
-		} else {
-			struct rq *rq;
-			struct rq_flags rf;
-
-			rq = task_rq_lock(p, &rf);
-
-			/*
-			 * @p->scx.disallow rejects future %SCHED_EXT
-			 * transitions in scx_check_setscheduler(). If @p is
-			 * already %SCHED_EXT, revert @p->policy in the load
-			 * path, which applies it right after. Elsewhere, such
-			 * as when @p is re-homed from a sub-sched, nothing
-			 * reads the policy and @p would stay on SCX.
-			 */
-			if (p->policy == SCHED_EXT) {
-				if (scx_enable_state() == SCX_ENABLING) {
-					p->policy = SCHED_NORMAL;
-					atomic_long_inc(&scx_nr_rejected);
-				} else {
-					scx_error(sch, "ops.init_task() set task->scx.disallow for SCHED_EXT %s[%d] outside the enable path",
-						  p->comm, p->pid);
-				}
-			}
-
-			task_rq_unlock(rq, p, &rf);
-		}
+		return 0;
 	}
 
+	/*
+	 * Record root's decision in %SCX_TASK_DISALLOW, which BPF can't write,
+	 * for scx_check_setscheduler(). Root's earlier decision for @p stays in
+	 * effect until here, including while ops.init_task() runs.
+	 */
+	rq = task_rq_lock(p, &rf);
+
+	if (p->scx.disallow) {
+		/*
+		 * If @p is already %SCHED_EXT, revert @p->policy in the load
+		 * path, which applies it right after. Elsewhere, such as when
+		 * @p is re-homed from a sub-sched, nothing reads the policy and
+		 * @p would stay on SCX.
+		 */
+		if (p->policy == SCHED_EXT) {
+			if (scx_enable_state() == SCX_ENABLING) {
+				p->policy = SCHED_NORMAL;
+				atomic_long_inc(&scx_nr_rejected);
+			} else {
+				scx_error(sch, "ops.init_task() set task->scx.disallow for SCHED_EXT %s[%d] outside the enable path",
+					  p->comm, p->pid);
+			}
+		}
+		p->scx.flags |= SCX_TASK_DISALLOW;
+	} else {
+		p->scx.flags &= ~SCX_TASK_DISALLOW;
+	}
+
+	task_rq_unlock(rq, p, &rf);
 	return 0;
 }
 
@@ -5154,12 +5165,13 @@ int scx_check_setscheduler(struct task_struct *p, int policy)
 	lockdep_assert_rq_held(task_rq(p));
 
 	/*
-	 * If disallow, reject transitioning into SCX. ops.init_task() sets
-	 * disallow while the scheduler is still loading, so don't wait for
+	 * If root disallowed @p, reject transitioning into SCX. Root decides
+	 * while the scheduler is still loading, so don't wait for
 	 * scx_enabled(). A flag left over from an unloaded scheduler doesn't
 	 * count.
 	 */
-	if (scx_enable_state() != SCX_DISABLED && READ_ONCE(p->scx.disallow) &&
+	if (scx_enable_state() != SCX_DISABLED &&
+	    (p->scx.flags & SCX_TASK_DISALLOW) &&
 	    p->policy != policy && policy == SCHED_EXT)
 		return -EACCES;
 
@@ -7678,7 +7690,7 @@ static void scx_root_disable(struct scx_sched *sch)
 
 		scx_disable_and_exit_task(scx_task_sched(p), p);
 		/* see scx_check_setscheduler() */
-		WRITE_ONCE(p->scx.disallow, false);
+		p->scx.flags &= ~SCX_TASK_DISALLOW;
 	}
 	scx_task_iter_stop(&sti);
 
