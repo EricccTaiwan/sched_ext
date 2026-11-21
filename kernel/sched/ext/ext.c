@@ -4666,9 +4666,6 @@ int __scx_init_task(struct scx_sched *sch, struct task_struct *p,
 		} else if (unlikely(fork)) {
 			scx_error(sch, "ops.init_task() set task->scx.disallow for %s[%d] during fork",
 				  p->comm, p->pid);
-		} else if (unlikely(scx_enable_state() != SCX_ENABLING)) {
-			scx_error(sch, "ops.init_task() set task->scx.disallow for %s[%d] outside the enable path",
-				  p->comm, p->pid);
 		} else {
 			struct rq *rq;
 			struct rq_flags rf;
@@ -4676,15 +4673,21 @@ int __scx_init_task(struct scx_sched *sch, struct task_struct *p,
 			rq = task_rq_lock(p, &rf);
 
 			/*
-			 * We're in the load path and @p->policy will be applied
-			 * right after. Reverting @p->policy here and rejecting
-			 * %SCHED_EXT transitions from scx_check_setscheduler()
-			 * guarantees that if ops.init_task() sets @p->disallow,
-			 * @p can never be in SCX.
+			 * @p->scx.disallow rejects future %SCHED_EXT
+			 * transitions in scx_check_setscheduler(). If @p is
+			 * already %SCHED_EXT, revert @p->policy in the load
+			 * path, which applies it right after. Elsewhere, such
+			 * as when @p is re-homed from a sub-sched, nothing
+			 * reads the policy and @p would stay on SCX.
 			 */
 			if (p->policy == SCHED_EXT) {
-				p->policy = SCHED_NORMAL;
-				atomic_long_inc(&scx_nr_rejected);
+				if (scx_enable_state() == SCX_ENABLING) {
+					p->policy = SCHED_NORMAL;
+					atomic_long_inc(&scx_nr_rejected);
+				} else {
+					scx_error(sch, "ops.init_task() set task->scx.disallow for SCHED_EXT %s[%d] outside the enable path",
+						  p->comm, p->pid);
+				}
 			}
 
 			task_rq_unlock(rq, p, &rf);
