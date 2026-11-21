@@ -62,8 +62,9 @@ enum scx_exit_kind {
 
 /*
  * An exit code can be specified when exiting with scx_bpf_exit() or scx_exit(),
- * corresponding to exit_kind UNREG_BPF and UNREG_KERN respectively. The codes
- * are 64bit of the format:
+ * corresponding to exit_kind UNREG_BPF and UNREG_KERN respectively. PARENT
+ * inherits %SCX_ECODE_ACT_RESTART from the parent. The codes are 64bit of the
+ * format:
  *
  *   Bits: [63  ..  48 47   ..  32 31 .. 0]
  *         [ SYS ACT ] [ SYS RSN ] [ USR  ]

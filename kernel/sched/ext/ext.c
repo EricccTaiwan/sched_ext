@@ -6232,7 +6232,8 @@ static const struct attribute_group scx_global_attr_group = {
 static void free_pnode(struct scx_sched_pnode *pnode);
 static void free_exit_info(struct scx_exit_info *ei);
 static const char *scx_exit_reason(enum scx_exit_kind kind);
-static bool scx_claim_exit(struct scx_sched *sch, enum scx_exit_kind kind);
+static bool scx_claim_exit(struct scx_sched *sch, enum scx_exit_kind kind,
+			   s64 exit_code);
 
 s32 scx_alloc_kern_arena_objs(struct scx_sched *sch)
 {
@@ -6666,7 +6667,7 @@ bool scx_rcu_cpu_stall(const struct cpumask *stalled_mask)
 
 	guard(preempt)();
 
-	if (!scx_claim_exit(sch, SCX_EXIT_ERROR))
+	if (!scx_claim_exit(sch, SCX_EXIT_ERROR, 0))
 		return false;
 
 #ifdef CONFIG_STACKTRACE
@@ -7776,16 +7777,21 @@ done:
  * is serialized but ops.exit() can take arbitrarily long and running them in
  * separate helper kthreads parallelizes it. No recursion as only non-PARENT
  * claims propagate.
+ *
+ * The descendants inherit %SCX_ECODE_ACT_RESTART so that they restart along
+ * with @sch, e.g. on CPU hotplug.
  */
 static void scx_propagate_exit_irq_workfn(struct irq_work *irq_work)
 {
 	struct scx_sched *sch = container_of(irq_work, struct scx_sched,
 					     propagate_exit_irq_work);
+	s64 exit_code = sch->exit_info->exit_code & SCX_ECODE_ACT_RESTART;
 	struct scx_sched *pos;
 
 	scoped_guard (raw_spinlock_irqsave, &scx_sched_lock) {
 		scx_for_each_descendant_pre(pos, sch)
-			scx_disable(pos, SCX_EXIT_PARENT);
+			if (scx_claim_exit(pos, SCX_EXIT_PARENT, exit_code))
+				irq_work_queue(&pos->disable_irq_work);
 	}
 }
 
@@ -7798,7 +7804,8 @@ static void scx_propagate_exit_irq_workfn(struct irq_work *irq_work)
  *
  * Lock-free and safe to call from any context including NMI.
  */
-static bool scx_claim_exit(struct scx_sched *sch, enum scx_exit_kind kind)
+static bool scx_claim_exit(struct scx_sched *sch, enum scx_exit_kind kind,
+			   s64 exit_code)
 {
 	int none = SCX_EXIT_NONE;
 
@@ -7809,6 +7816,9 @@ static bool scx_claim_exit(struct scx_sched *sch, enum scx_exit_kind kind)
 
 	if (!atomic_try_cmpxchg(&sch->exit_kind, &none, kind))
 		return false;
+
+	/* before propagation, which passes it on to the descendants */
+	sch->exit_info->exit_code = exit_code;
 
 	if (kind == SCX_EXIT_PARENT) {
 		/* an ancestor is already sweeping the subtree */
@@ -7864,7 +7874,7 @@ static void scx_disable_workfn(struct kthread_work *work)
 static void scx_disable(struct scx_sched *sch, enum scx_exit_kind kind)
 {
 	guard(preempt)();
-	if (scx_claim_exit(sch, kind))
+	if (scx_claim_exit(sch, kind, 0))
 		irq_work_queue(&sch->disable_irq_work);
 }
 
@@ -8265,11 +8275,10 @@ static void scx_disable_irq_workfn(struct irq_work *irq_work)
 
 /* finish exit_info and kick the disable work, ei->msg must already be set */
 static void scx_finish_exit(struct scx_sched *sch, enum scx_exit_kind kind,
-			    s64 exit_code, s32 exit_cpu)
+			    s32 exit_cpu)
 {
 	struct scx_exit_info *ei = sch->exit_info;
 
-	ei->exit_code = exit_code;
 #ifdef CONFIG_STACKTRACE
 	/*
 	 * stack_trace_save()'s NMI-safety is arch-dependent and undocumented.
@@ -8297,12 +8306,12 @@ bool scx_vexit(struct scx_sched *sch,
 
 	guard(preempt)();
 
-	if (!scx_claim_exit(sch, kind))
+	if (!scx_claim_exit(sch, kind, exit_code))
 		return false;
 
 	vscnprintf(ei->msg, SCX_EXIT_MSG_LEN, fmt, args);
 
-	scx_finish_exit(sch, kind, exit_code, exit_cpu);
+	scx_finish_exit(sch, kind, exit_cpu);
 	return true;
 }
 
@@ -11414,7 +11423,7 @@ bool scx_exit_bstr(struct scx_sched *sch, enum scx_exit_kind kind,
 
 	guard(preempt)();
 
-	if (!scx_claim_exit(sch, kind))
+	if (!scx_claim_exit(sch, kind, exit_code))
 		return false;
 
 	ret = __bstr_format(fmt_blame, data_buf, ei->msg, SCX_EXIT_MSG_LEN,
@@ -11423,7 +11432,7 @@ bool scx_exit_bstr(struct scx_sched *sch, enum scx_exit_kind kind,
 		scnprintf(ei->msg, SCX_EXIT_MSG_LEN,
 			  "exit message formatting failed (%d)", ret);
 
-	scx_finish_exit(sch, kind, exit_code, raw_smp_processor_id());
+	scx_finish_exit(sch, kind, raw_smp_processor_id());
 	return true;
 }
 
