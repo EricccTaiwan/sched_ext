@@ -1013,7 +1013,8 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(qmap_init_task, struct task_struct *p,
 	    !bpf_strncmp(p->comm, 6, "qmfail"))
 		return -ENOMEM;
 
-	if (p->tgid == disallow_tgid)
+	/* setting disallow during fork fails the scheduler */
+	if (p->tgid == disallow_tgid && !args->fork)
 		p->scx.disallow = true;
 
 	/* pop a slab entry off the free list */
