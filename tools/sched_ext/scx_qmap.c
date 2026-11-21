@@ -278,6 +278,7 @@ int main(int argc, char **argv)
 	u32 inject_mode = 0;
 	u64 own_cgid = 0;
 	s32 cid_override_shard_sz = 4;
+	bool restarted = false;
 
 	libbpf_set_print(libbpf_print_fn);
 	signal(SIGINT, sigint_handler);
@@ -481,7 +482,23 @@ restart:
 		}
 	}
 
-	link = SCX_OPS_ATTACH(skel, qmap_ops, scx_qmap);
+	if (sub_cg_path && restarted) {
+		/*
+		 * A sub-scheduler restarts along with its parent, e.g. on CPU
+		 * hotplug. Retry while root isn't back yet.
+		 */
+		bpf_map__set_autoattach(skel->maps.qmap_ops, false);
+		SCX_BUG_ON(scx_qmap__attach(skel), "Failed to attach skel");
+		for (i = 0; i < 100; i++) {
+			link = bpf_map__attach_struct_ops(skel->maps.qmap_ops);
+			if (link || errno != ENODEV)
+				break;
+			usleep(100 * 1000);
+		}
+		SCX_BUG_ON(!link, "Failed to attach struct_ops");
+	} else {
+		link = SCX_OPS_ATTACH(skel, qmap_ops, scx_qmap);
+	}
 
 	qa->test_error_cnt = test_error_cnt;
 	qa->inject_mode = inject_mode;
@@ -533,7 +550,9 @@ restart:
 	ecode = UEI_REPORT(skel, uei);
 	scx_qmap__destroy(skel);
 
-	if (!exit_req && UEI_ECODE_RESTART(ecode))
+	if (!exit_req && UEI_ECODE_RESTART(ecode)) {
+		restarted = true;
 		goto restart;
+	}
 	return 0;
 }
