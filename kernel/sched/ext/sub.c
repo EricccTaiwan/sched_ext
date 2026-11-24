@@ -2786,6 +2786,9 @@ __bpf_kfunc bool scx_bpf_sub_dispatch(u64 cgroup_id, const struct bpf_prog_aux *
 	if (unlikely(!parent))
 		return false;
 
+	if (!scx_kf_rq_locked(parent))
+		return false;
+
 	child = scx_find_sub_sched(cgroup_id);
 
 	if (unlikely(!child))

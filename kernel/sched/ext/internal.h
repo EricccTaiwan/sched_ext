@@ -2497,6 +2497,23 @@ static inline void update_locked_rq(struct rq *rq)
 	__this_cpu_write(scx_locked_rq_state, rq);
 }
 
+/*
+ * The verifier checks the kfunc calls of an async callback, e.g. a bpf_timer
+ * callback, against the op that the program is attached to, but the callback
+ * runs outside of that op without any rq lock held. Kfuncs which work on the rq
+ * the current op is locked to must check that there is one.
+ */
+static __always_inline bool __scx_kf_rq_locked(struct scx_sched *sch, const char *who)
+{
+	if (unlikely(!scx_locked_rq())) {
+		scx_error(sch, "%s called without a locked rq", who);
+		return false;
+	}
+	return true;
+}
+
+#define scx_kf_rq_locked(sch)	__scx_kf_rq_locked((sch), __func__)
+
 #define SCX_HAS_OP(sch, op)	test_bit(SCX_OP_IDX(op), (sch)->has_op)
 
 /*

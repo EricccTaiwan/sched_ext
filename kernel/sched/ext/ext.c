@@ -10075,6 +10075,9 @@ static void scx_dsq_insert_commit(struct scx_sched *sch, struct task_struct *p,
 		return;
 	}
 
+	if (!__scx_kf_rq_locked(sch, "scx_bpf_dsq_insert[_vtime]()"))
+		return;
+
 	if (unlikely(dspc->cursor >= sch->dsp_max_batch)) {
 		scx_error(sch, "dispatch buffer overflow");
 		return;
@@ -10480,6 +10483,9 @@ __bpf_kfunc bool scx_bpf_dsq_move_to_local___v2(u64 dsq_id, u64 enq_flags,
 	if (unlikely(!sch))
 		return false;
 
+	if (!scx_kf_rq_locked(sch))
+		return false;
+
 	if (!scx_vet_enq_flags(sch, SCX_DSQ_LOCAL, &enq_flags))
 		return false;
 
@@ -10653,6 +10659,9 @@ __bpf_kfunc u32 scx_bpf_reenqueue_local(const struct bpf_prog_aux *aux)
 	guard(rcu)();
 	sch = scx_prog_sched(aux);
 	if (unlikely(!sch))
+		return 0;
+
+	if (!scx_kf_rq_locked(sch))
 		return 0;
 
 	rq = cpu_rq(smp_processor_id());
