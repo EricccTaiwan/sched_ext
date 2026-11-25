@@ -2510,6 +2510,8 @@ static inline void update_locked_rq(struct rq *rq)
 /*
  * SCX ops can recurse via scx_bpf_sub_dispatch() - the inner call must not
  * clobber the outer's scx_locked_rq_state. Save it on entry, restore on exit.
+ * An op called without @locked_rq leaves the state alone, so it must not run
+ * from inside an op that holds an rq lock, or it would inherit that rq.
  *
  * @ops is the ops table to dispatch through: ops for the cpu form, ops_cid
  * for the cid form.
@@ -2521,6 +2523,8 @@ do {										\
 	if (locked_rq) {							\
 		__prev_locked_rq = scx_locked_rq();				\
 		update_locked_rq(locked_rq);					\
+	} else {								\
+		lockdep_assert_once(!scx_locked_rq());				\
 	}									\
 	(sch)->ops.op(args);							\
 	if (locked_rq)								\
@@ -2538,6 +2542,8 @@ do {										\
 	if (locked_rq) {							\
 		__prev_locked_rq = scx_locked_rq();				\
 		update_locked_rq(locked_rq);					\
+	} else {								\
+		lockdep_assert_once(!scx_locked_rq());				\
 	}									\
 	__ret = (sch)->ops.op(args);						\
 	if (locked_rq)								\
