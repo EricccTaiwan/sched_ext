@@ -8005,6 +8005,12 @@ static void ops_dump_exit(void)
 	scx_dump_data.cpu = -1;
 }
 
+/* whether this cpu is in scx_dump_state(), where scx_bpf_dump() is allowed */
+bool scx_in_dump(void)
+{
+	return READ_ONCE(scx_dump_data.cpu) == raw_smp_processor_id();
+}
+
 static void scx_dump_task(struct scx_sched *sch, struct seq_buf *s, struct scx_dump_ctx *dctx,
 			  struct rq *rq, struct task_struct *p, char marker)
 {

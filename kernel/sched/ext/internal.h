@@ -909,6 +909,8 @@ struct sched_ext_ops {
 	 * cpu, once it is in effect.
 	 *
 	 * May call scx_bpf_sub_grant() / scx_bpf_sub_revoke() on children.
+	 * Even if the parent called grant / revoke under an rq lock or from
+	 * ops.select_cpu() or ops.dump*(), this callback runs unlocked.
 	 */
 	void (*sub_caps_updated)(const struct scx_cmask *cmask, u64 caps);
 
@@ -1666,6 +1668,11 @@ enum scx_cap_flags {
  *
  * (3) leads to deferred delivery. Events accumulate during grant/revoke and are
  * delivered after the shard lock is released.
+ *
+ * When grant or revoke runs in an SCX op context (an rq lock held,
+ * ops.select_cpu() or ops.dump*()), caps_updated_deliver_or_defer() defers the
+ * delivery to an irq_work so that ops.sub_caps_updated() always runs unlocked
+ * instead of inheriting the caller's context.
  */
 struct scx_caps_updated {
 	raw_spinlock_t		lock;
@@ -2314,6 +2321,7 @@ bool scx_consume_dispatch_q(struct scx_sched *sch, struct rq *rq,
 			    struct scx_dispatch_q *dsq, u64 enq_flags);
 bool scx_consume_global_dsq(struct scx_sched *sch, struct rq *rq);
 bool scx_rq_online(struct rq *rq);
+bool scx_in_dump(void);
 void scx_flush_dispatch_buf(struct scx_sched *sch, struct rq *rq);
 s32 scx_init_dsq(struct scx_dispatch_q *dsq, u64 dsq_id, struct scx_sched *sch);
 __printf(2, 3) void scx_dump_line(struct seq_buf *s, const char *fmt, ...);

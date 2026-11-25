@@ -66,7 +66,10 @@ static DECLARE_WAIT_QUEUE_HEAD(ecaps_offline_waitq);
 static struct cpumask scx_frozen_cpus;
 static DECLARE_WAIT_QUEUE_HEAD(scx_frozen_cpus_waitq);
 
-/* between the PREPARE and POST notifications of a PM cycle */
+/*
+ * True between the PREPARE and POST notifications of a PM cycle. Updated under
+ * caps_updated_deferred_lock.
+ */
 static bool scx_pm_in_progress;
 
 /**
@@ -307,6 +310,47 @@ void set_cgroup_sched(struct cgroup *cgrp, struct scx_sched *sch)
 		rcu_assign_pointer(pos->scx_sched, sch);
 }
 
+/*
+ * Queue of ops.sub_caps_updated() deliveries deferred out of SCX op contexts.
+ * Queued entries stay linked on scx_caps_updated->node_in_flight so that
+ * caps_updated_record() keeps coalescing into them.
+ *
+ * Each cpu has its own hard irq_work:
+ * - A single irq_work queued on multiple cpus can run irq_work_single()
+ *   concurrently and clear IRQ_WORK_BUSY early, breaking irq_work_sync().
+ * - A dying cpu still runs SCX ops after hotplug parks its irq_work thread,
+ *   which would strand a regular irq_work on PREEMPT_RT.
+ */
+static void caps_updated_deferred_workfn(struct irq_work *irq_work);
+static LIST_HEAD(caps_updated_deferred);
+static DEFINE_RAW_SPINLOCK(caps_updated_deferred_lock);
+static DEFINE_PER_CPU(struct irq_work, caps_updated_deferred_irq_work) =
+	IRQ_WORK_INIT_HARD(caps_updated_deferred_workfn);
+
+/*
+ * Drop @sch's deferred caps_updated deliveries before freeing its pshards.
+ * scx_sched_free_rcu_work() calls this after two RCU grace periods post
+ * unlink, so scx_bpf_sub_grant/revoke() cannot queue new entries for @sch.
+ */
+static void caps_updated_cancel_deferred(struct scx_sched *sch)
+{
+	struct scx_caps_updated *cu, *tmp;
+	s32 cpu;
+
+	scoped_guard (raw_spinlock_irqsave, &caps_updated_deferred_lock) {
+		list_for_each_entry_safe(cu, tmp, &caps_updated_deferred, node_in_flight) {
+			if (container_of(cu, struct scx_pshard, caps_updated)->sch != sch)
+				continue;
+			guard(raw_spinlock)(&cu->lock);
+			list_del_init(&cu->node_in_flight);
+		}
+	}
+
+	/* wait for any workfn that already spliced @sch's entries */
+	for_each_possible_cpu(cpu)
+		irq_work_sync(per_cpu_ptr(&caps_updated_deferred_irq_work, cpu));
+}
+
 static void free_pshard(struct scx_pshard *pshard)
 {
 	struct scx_caps_updated *cu;
@@ -327,6 +371,7 @@ void scx_free_pshards(struct scx_sched *sch)
 
 	if (!sch->pshard)
 		return;
+	caps_updated_cancel_deferred(sch);
 	for (si = 0; si < sch->nr_pshards; si++)
 		free_pshard(sch->pshard[si]);
 	kfree(sch->pshard);
@@ -1034,6 +1079,77 @@ static void caps_updated_deliver(struct list_head *to_deliver)
 	}
 }
 
+static void caps_updated_deferred_workfn(struct irq_work *irq_work)
+{
+	LIST_HEAD(to_deliver);
+
+	/* hard irq_work, same irq-disabled context as a synchronous delivery */
+	lockdep_assert_irqs_disabled();
+
+	scoped_guard (raw_spinlock, &caps_updated_deferred_lock)
+		list_splice_init(&caps_updated_deferred, &to_deliver);
+
+	caps_updated_deliver(&to_deliver);
+}
+
+static void caps_updated_kick_deferred(void)
+{
+	s32 cpu = smp_processor_id();
+
+	lockdep_assert_held(&caps_updated_deferred_lock);
+	lockdep_assert_irqs_disabled();
+
+	/*
+	 * During the PM syscore phase, irq_work_queue() can malfunction.
+	 * scx_sub_pm_end() kicks the queue when the PM cycle finishes.
+	 */
+	if (unlikely(scx_pm_in_progress))
+		return;
+
+	if (likely(cpu_online(cpu))) {
+		irq_work_queue(this_cpu_ptr(&caps_updated_deferred_irq_work));
+		return;
+	}
+
+	/*
+	 * When hotplug parks a dying cpu's migration thread, ops.update_idle()
+	 * runs after smpcfd_dying_cpu() already drained local irq_work. Route
+	 * to an online cpu; cpus_write_lock() keeps cpu_online_mask stable.
+	 */
+	cpu = cpumask_first(cpu_online_mask);
+	if (likely(cpu < nr_cpu_ids))
+		irq_work_queue_on(per_cpu_ptr(&caps_updated_deferred_irq_work, cpu),
+				  cpu);
+}
+
+/*
+ * If the caller runs in an SCX op context (an rq lock held, ops.select_cpu()
+ * or ops.dump*()), defer @to_deliver to an irq_work. Otherwise deliver it now.
+ *
+ * ops.sub_caps_updated() is called with a NULL locked_rq, which leaves
+ * scx_locked_rq() untouched. Delivering synchronously here would inherit the
+ * parent's scx_locked_rq() or dump state and hold the parent's rq lock, pi_lock
+ * or scx_dump_lock across any cascading grant/revoke down the subtree.
+ */
+static void caps_updated_deliver_or_defer(struct list_head *to_deliver)
+{
+	lockdep_assert_irqs_disabled();
+
+	if (likely(!scx_locked_rq() && !current->scx.kf_tasks[0] &&
+		   !this_rq()->scx.in_select_cpu && !scx_in_dump())) {
+		caps_updated_deliver(to_deliver);
+		return;
+	}
+
+	if (list_empty(to_deliver))
+		return;
+
+	scoped_guard (raw_spinlock, &caps_updated_deferred_lock) {
+		list_splice_tail_init(to_deliver, &caps_updated_deferred);
+		caps_updated_kick_deferred();
+	}
+}
+
 /*
  * Deliver caps owed to @sch that couldn't be delivered earlier (e.g. a grant
  * taken during its sub_attach(), before has_op was set). Called once has_op is
@@ -1325,6 +1441,7 @@ void __scx_process_sync_ecaps(struct rq *rq, struct task_struct *prev)
 
 void scx_sub_pm_begin(void)
 {
+	guard(raw_spinlock_irqsave)(&caps_updated_deferred_lock);
 	WRITE_ONCE(scx_pm_in_progress, true);
 }
 
@@ -1376,7 +1493,11 @@ void scx_sub_pm_end(void)
 				   cpumask_weight(&scx_frozen_cpus));
 	}
 
-	WRITE_ONCE(scx_pm_in_progress, false);
+	scoped_guard (raw_spinlock_irqsave, &caps_updated_deferred_lock) {
+		WRITE_ONCE(scx_pm_in_progress, false);
+		if (!list_empty(&caps_updated_deferred))
+			caps_updated_kick_deferred();
+	}
 	cpumask_clear(&scx_frozen_cpus);
 	wake_up_all(&scx_frozen_cpus_waitq);
 }
@@ -2981,7 +3102,7 @@ __bpf_kfunc s32 scx_bpf_sub_grant(u64 cgroup_id, u64 caps,
 
 	ret = any_denied ? -EPERM : 0;
 out:
-	caps_updated_deliver(&to_deliver);
+	caps_updated_deliver_or_defer(&to_deliver);
 	return ret;
 }
 
@@ -3073,7 +3194,7 @@ __bpf_kfunc void scx_bpf_sub_revoke(u64 cgroup_id, u64 caps,
 		}
 	}
 
-	caps_updated_deliver(&to_deliver);
+	caps_updated_deliver_or_defer(&to_deliver);
 }
 
 /**
