@@ -57,6 +57,7 @@ struct scx_cid_tables {
 	s32			*shard_node;	/* [num_possible_cpus()] */
 	struct scx_cid_shard	*shard_ranges;	/* [num_possible_cpus()] */
 	struct scx_cid_topo	*topo;		/* [num_possible_cpus()] */
+	struct task_struct	*owner;		/* builds the set until published */
 	struct rcu_head		rcu;
 };
 

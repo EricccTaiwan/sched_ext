@@ -136,6 +136,8 @@ void scx_cid_publish_tables(void)
 
 	lockdep_assert_held(&scx_enable_mutex);
 
+	/* no more scx_bpf_cid_override() */
+	WRITE_ONCE(tbls->owner, NULL);
 	scx_nr_cid_shards = tbls->nr_shards;
 	rcu_assign_pointer(scx_cid_to_cpu_tbl, tbls->cid_to_cpu);
 	rcu_assign_pointer(scx_cpu_to_cid_tbl, tbls->cpu_to_cid);
@@ -216,6 +218,7 @@ s32 scx_cid_init(struct scx_sched *sch)
 	if (!tbls)
 		return -ENOMEM;
 
+	tbls->owner = current;
 	scx_cid_tables = tbls;
 
 	for (si = 0; si < num_possible_cpus(); si++)
@@ -541,9 +544,20 @@ __bpf_kfunc void scx_bpf_cid_override(const s32 *cpu_to_cid__arena, u32 cpu_to_c
 	if (unlikely(!sch))
 		return;
 
+	/*
+	 * The verifier also allows the async callbacks, e.g. bpf_wq, that
+	 * ops.init_cids() sets up, but those run later from another task,
+	 * possibly after the tables have been published. Only the enabling task
+	 * may override, and only until the tables are published.
+	 */
+	tbls = READ_ONCE(scx_cid_tables);
+	if (unlikely(!tbls || READ_ONCE(tbls->owner) != current)) {
+		scx_error(sch, "scx_bpf_cid_override: called outside ops.init_cids()");
+		return;
+	}
+
 	/* called from ops.init_cids(), so the tables exist and are unpublished */
 	lockdep_assert_held(&scx_enable_mutex);
-	tbls = scx_cid_tables;
 
 	if (cpu_to_cid_cnt != nr_cpu_ids) {
 		scx_error(sch, "scx_bpf_cid_override: cpu_to_cid expected %u entries, got %u",
