@@ -1739,7 +1739,8 @@ static void scx_fail_parent(struct scx_sched *sch,
  * Dying but not yet offlined task_groups are included: a removed cgroup keeps
  * hosting scheduling events until its dying tasks finish their final context
  * switches, so it still needs to be inited on a sched, and its offline-time
- * ops.cgroup_exit() follows the last of those events.
+ * ops.cgroup_exit() follows the last of those events. If @sch's
+ * ops.cgroup_init() fails on one, it stays with the parent.
  *
  * Return 0 on success, -errno on failure. On failure, @sch has been
  * scx_error()'d and is left with no cgroups.
@@ -1769,6 +1770,12 @@ static s32 scx_cgroup_claim_subtree(struct scx_sched *sch)
 		if (SCX_HAS_OP(sch, cgroup_init)) {
 			ret = SCX_CALL_OP_RET(sch, cgroup_init, NULL, css->cgroup, &args);
 			if (ret) {
+				/*
+				 * See scx_cgroup_init(). Leave a dying tg with
+				 * the parent instead of failing @sch.
+				 */
+				if (css_is_dying(css))
+					continue;
 				scx_error(sch, "ops.cgroup_init() failed (%d)", ret);
 				goto err;
 			}
@@ -1822,7 +1829,8 @@ err:
  * while @sch had them.
  *
  * When an init on the parent fails, the parent is failed - the same policy as
- * task re-homing. The remaining task_groups are punted: they move to the parent
+ * task re-homing - unless the task_group is dying, which is just punted. After
+ * the parent fails, the remaining task_groups are punted: they move to the parent
  * anyway with %SCX_TG_INITED cleared, as ops.cgroup_init() failed or never ran
  * for them. A punted task_group gets no cgroup ops. The dying parent's own
  * disable moves it one sched up, initing it there. Root ends the chain: root
@@ -1889,6 +1897,9 @@ static void scx_cgroup_return_subtree(struct scx_sched *sch)
 		if (SCX_HAS_OP(parent, cgroup_init)) {
 			ret = SCX_CALL_OP_RET(parent, cgroup_init, NULL, css->cgroup, &args);
 			if (ret) {
+				/* see scx_cgroup_init(), punt a dying tg */
+				if (css_is_dying(css))
+					continue;
 				scx_error(parent, "ops.cgroup_init() failed (%d) while disabling a sub-scheduler",
 					  ret);
 				parent_failed = true;

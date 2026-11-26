@@ -5629,9 +5629,9 @@ void scx_tg_init(struct task_group *tg)
  * root sched.
  *
  * When a child sched exits, its task_groups are moved to the parent and
- * re-inited on it. A failed re-init fails the parent in turn and leaves the
- * task_group without a sched it's inited on, resolving to %NULL. See
- * scx_cgroup_return_subtree().
+ * re-inited on it. A failed re-init leaves the task_group without a sched it's
+ * inited on, resolving to %NULL, and fails the parent in turn unless the
+ * task_group is dying. See scx_cgroup_return_subtree().
  *
  * Safe for callers read-locking the ops rwsem. tg->scx.sched rewrites
  * write-lock it, and tg on/offline can't overlap such callers as a css's files
@@ -6134,7 +6134,8 @@ static int scx_cgroup_init(struct scx_sched *sch)
 
 	/*
 	 * scx_tg_on/offline() are excluded through cgroup_lock(). If we walk
-	 * cgroups and init, all online cgroups are initialized.
+	 * cgroups and init, all online cgroups are initialized, except dying
+	 * ones whose init failed, which are punted.
 	 */
 	css_for_each_descendant_pre(css, &root_task_group.css) {
 		struct task_group *tg = css_tg(css);
@@ -6153,6 +6154,18 @@ static int scx_cgroup_init(struct scx_sched *sch)
 
 			ret = SCX_CALL_OP_RET(sch, cgroup_init, NULL, css->cgroup, &args);
 			if (ret) {
+				/*
+				 * A removed cgroup stays online until its
+				 * offline work runs, and BPF can't create
+				 * cgroup local storage for it in the meantime.
+				 * Don't fail the scheduler for a cgroup that's
+				 * going away. Punt it like
+				 * scx_cgroup_return_subtree() does.
+				 */
+				if (css_is_dying(css)) {
+					tg->scx.sched = sch;
+					continue;
+				}
 				scx_error(sch, "ops.cgroup_init() failed (%d)", ret);
 				return ret;
 			}
