@@ -896,17 +896,17 @@ int BPF_STRUCT_OPS_SLEEPABLE(fcg_cgroup_init, struct cgroup *cgrp,
 	cgv_node->cgid = cgid;
 	cgv_node->cvtime = cvtime_now;
 
+	/*
+	 * try_pick_next_cgroup() may stash a node into an element which
+	 * fcg_cgroup_exit() has just deleted, and the node stays in the element
+	 * when it's recycled for this cgroup. Drop the leftover.
+	 */
 	cgv_node = bpf_kptr_xchg(&stash->node, cgv_node);
-	if (cgv_node) {
-		scx_bpf_error("unexpected !NULL cgv_node stash");
-		ret = -EBUSY;
-		goto err_drop;
-	}
+	if (cgv_node)
+		bpf_obj_drop(cgv_node);
 
 	return 0;
 
-err_drop:
-	bpf_obj_drop(cgv_node);
 err_del_cgv_node:
 	bpf_map_delete_elem(&cgv_node_stash, &cgid);
 err_destroy_dsq:
@@ -916,13 +916,25 @@ err_destroy_dsq:
 
 void BPF_STRUCT_OPS(fcg_cgroup_exit, struct cgroup *cgrp)
 {
+	struct cgv_node_stash *stash;
+	struct cgv_node *cgv_node;
 	u64 cgid = cgrp->kn->id;
 
 	/*
 	 * For now, there's no way find and remove the cgv_node if it's on the
 	 * cgv_tree. Let's drain them in the dispatch path as they get popped
 	 * off the front of the tree.
+	 *
+	 * If the node is in the stash, free it here. Deleting the element
+	 * doesn't, and the element would carry the node to the next cgroup
+	 * that reuses it.
 	 */
+	stash = bpf_map_lookup_elem(&cgv_node_stash, &cgid);
+	if (stash) {
+		cgv_node = bpf_kptr_xchg(&stash->node, NULL);
+		if (cgv_node)
+			bpf_obj_drop(cgv_node);
+	}
 	bpf_map_delete_elem(&cgv_node_stash, &cgid);
 	scx_bpf_destroy_dsq(cgid);
 }
