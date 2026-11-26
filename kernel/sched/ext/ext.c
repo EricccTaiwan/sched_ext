@@ -4261,6 +4261,13 @@ bool scx_prio_less(const struct task_struct *a, const struct task_struct *b,
 
 	return time_after(a->scx.runnable_at, b->scx.runnable_at);
 }
+
+static int task_is_throttled_scx(struct task_struct *p, int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	return !scx_task_can_stay_on_cpu(rq, p) && p != scx_rescuee(rq);
+}
 #endif	/* CONFIG_SCHED_CORE */
 
 static int select_task_rq_scx(struct task_struct *p, int prev_cpu, int wake_flags)
@@ -5958,6 +5965,10 @@ DEFINE_SCHED_CLASS(ext) = {
 	.prio_changed		= prio_changed_scx,
 
 	.update_curr		= update_curr_scx,
+
+#ifdef CONFIG_SCHED_CORE
+	.task_is_throttled	= task_is_throttled_scx,
+#endif
 
 #ifdef CONFIG_UCLAMP_TASK
 	.uclamp_enabled		= 1,
