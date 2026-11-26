@@ -197,6 +197,7 @@ auto-test-targets :=			\
 	select_cpu_dispatch_dbl_dsp	\
 	select_cpu_vtime		\
 	rt_stall			\
+	sub_core_caps			\
 	test_example			\
 	total_bw			\
 	unlocked_kfunc			\
